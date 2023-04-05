@@ -4,10 +4,14 @@ use async_std::io::BufReader;
 use async_std::prelude::*;
 use async_std::task;
 use futures::StreamExt;
+use log::{debug, info};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub(crate) fn main() -> Result<()> {
+    env_logger::init();
+    debug!("inited");
+
     task::block_on(try_main())
 }
 
@@ -19,6 +23,7 @@ async fn try_main() -> Result<()> {
         match lines_from_stdin.next().await {
             Some(res) => {
                 let line = res?;
+                info!("Received {}", line);
                 stdout.write_all(line.as_bytes()).await?;
                 stdout.write_all(b"\n").await?;
             }
