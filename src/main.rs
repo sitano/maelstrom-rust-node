@@ -4,6 +4,7 @@ mod log_util;
 mod waitgroup;
 
 use crate::waitgroup::WaitGroup;
+use futures::FutureExt;
 use log::{debug, info};
 use std::future::Future;
 use std::sync::Arc;
@@ -45,11 +46,10 @@ impl Runtime {
         T::Output: Send + 'static,
     {
         let h = self.serving.clone();
-        tokio::spawn(async move {
-            let res = future.await;
+        tokio::spawn(future.then(async move |x| {
             drop(h);
-            res
-        })
+            x
+        }))
     }
 }
 
