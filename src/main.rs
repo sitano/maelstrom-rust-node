@@ -1,6 +1,7 @@
 #![feature(async_closure)]
 
 mod log_util;
+mod protocol;
 mod waitgroup;
 
 use crate::waitgroup::WaitGroup;

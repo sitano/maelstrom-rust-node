@@ -10,3 +10,5 @@ env_logger = "0.10.0"
 futures = "0.3.28"
 log = "0.4.17"
 tokio = { version = "1.27.0", features = ["full"] }
+serde = { version = "1.0.159", features = ["derive"] }
+serde_json = "1.0.95"
