@@ -66,12 +66,19 @@ pub(crate) fn main() -> Result<()> {
 async fn try_main() -> Result<()> {
     let stdin = BufReader::new(stdin());
     let runtime = Arc::new(Runtime::new(stdout()));
+
     let mut lines_from_stdin = stdin.lines();
     while let Some(line) = lines_from_stdin.next_line().await? {
         info!("Received {}", line);
         runtime.spawn(received(runtime.clone(), line));
     }
-    Ok(runtime.serving.wait().await)
+
+    runtime.serving.wait().await;
+
+    // TODO: print stats?
+    debug!("done");
+
+    Ok(())
 }
 
 async fn received(runtime: Arc<Runtime>, data: String) -> Result<()> {
