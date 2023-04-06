@@ -1,5 +1,6 @@
 #![feature(async_closure)]
 
+mod log_util;
 mod waitgroup;
 
 use crate::waitgroup::WaitGroup;
@@ -53,7 +54,7 @@ impl Runtime {
 }
 
 pub(crate) fn main() -> Result<()> {
-    env_logger::init();
+    log_util::builder().init();
     debug!("inited");
 
     let runtime = tokio::runtime::Runtime::new()?;
