@@ -2,57 +2,16 @@
 
 mod log_util;
 mod protocol;
+mod runtime;
 mod waitgroup;
 
+use crate::runtime::Result;
+use crate::runtime::Runtime;
 use crate::waitgroup::WaitGroup;
-use futures::FutureExt;
 use log::{debug, info};
-use std::future::Future;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
+use tokio::io::AsyncBufReadExt;
 use tokio::io::{stdin, stdout, BufReader};
-use tokio::io::{AsyncBufReadExt, Stdout};
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-pub struct Runtime {
-    pub out: Mutex<Stdout>,
-    pub serving: WaitGroup,
-}
-
-impl Runtime {
-    pub fn new(out: Stdout) -> Self {
-        return Runtime {
-            out: Mutex::new(out),
-            serving: WaitGroup::new(),
-        };
-    }
-
-    pub async fn send_raw(self: &Self, msg: &str) -> Result<()> {
-        {
-            let mut out = self.out.lock().await;
-            out.write_all(msg.as_bytes()).await?;
-            out.write_all(b"\n").await?;
-        }
-        info!("Sent {}", msg);
-        Ok(())
-    }
-
-    #[track_caller]
-    pub fn spawn<T>(self: &Self, future: T) -> JoinHandle<T::Output>
-    where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
-    {
-        let h = self.serving.clone();
-        tokio::spawn(future.then(async move |x| {
-            drop(h);
-            x
-        }))
-    }
-}
 
 pub(crate) fn main() -> Result<()> {
     log_util::builder().init();
