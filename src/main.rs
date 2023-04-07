@@ -33,7 +33,7 @@ async fn try_main() -> Result<()> {
         runtime.spawn(received(runtime.clone(), line));
     }
 
-    runtime.serving.wait().await;
+    runtime.done().await;
 
     // TODO: print stats?
     debug!("done");
