@@ -75,36 +75,41 @@ impl Runtime {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+    use log::debug;
     use crate::runtime::{MembershipState, Result};
     use crate::Runtime;
     use tokio::io::stdout;
 
     #[test]
     fn membership() -> Result<()> {
-        let runtime = Runtime::new(stdout());
-        let state1 = MembershipState {
-            node_id: "n0".to_string(),
-            nodes: Vec::from(["n0".to_string(), "n1".to_string()]),
-        };
-        let state2 = MembershipState {
-            node_id: "n1".to_string(),
-            nodes: Vec::from(["n0".to_string(), "n1".to_string()]),
-        };
-
-        runtime.set_membership_state(state1);
-        assert_eq!(
-            runtime.membership().unwrap().node_id,
-            "n0",
-            "invalid node id"
-        );
-
-        runtime.set_membership_state(state2);
-        assert_eq!(
-            runtime.membership().unwrap().node_id,
-            "n1",
-            "invalid node id"
-        );
-
+        let tokio_runtime = tokio::runtime::Runtime::new()?;
+        tokio_runtime.block_on(async move {
+            let runtime = Arc::new(Runtime::new(stdout()));
+            let runtime0 = runtime.clone();
+            runtime.spawn(async move {
+                runtime0.set_membership_state(MembershipState::example("n0", &["n0", "n1"]));
+                debug!("{}", runtime0.membership().unwrap().node_id);
+                async move {
+                    runtime0.set_membership_state(MembershipState::example("n1", &["n0", "n1"]));
+                }.await;
+            });
+            runtime.done().await;
+            assert_eq!(
+                runtime.membership().unwrap().node_id,
+                "n1",
+                "invalid node id"
+            );
+        });
         Ok(())
+    }
+
+    impl MembershipState {
+        fn example(n: &str, s: &[&str]) -> Self {
+            return MembershipState{
+                node_id: n.to_string(),
+                nodes: s.iter().map(|x| x.to_string()).collect(),
+            }
+        }
     }
 }
