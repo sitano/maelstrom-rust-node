@@ -5,13 +5,15 @@ mod protocol;
 mod runtime;
 mod waitgroup;
 
+use crate::protocol::{Message, MessageBody};
 use crate::runtime::Result;
 use crate::runtime::Runtime;
 use crate::waitgroup::WaitGroup;
-use log::{debug, info};
+use log::debug;
+use serde::Deserialize;
+use serde::Serialize;
+use simple_error::bail;
 use std::sync::Arc;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::{stdin, stdout, BufReader};
 
 pub(crate) fn main() -> Result<()> {
     log_util::builder().init();
@@ -24,23 +26,50 @@ pub(crate) fn main() -> Result<()> {
 }
 
 async fn try_main() -> Result<()> {
-    let stdin = BufReader::new(stdin());
-    let runtime = Arc::new(Runtime::new(stdout()));
-
-    let mut lines_from_stdin = stdin.lines();
-    while let Some(line) = lines_from_stdin.next_line().await? {
-        info!("Received {}", line);
-        runtime.spawn(received(runtime.clone(), line));
-    }
-
-    runtime.done().await;
-
-    // TODO: print stats?
-    debug!("done");
-
-    Ok(())
+    let handler = Arc::new(Handler::default());
+    Runtime::new().with_handler(handler).run().await
 }
 
-async fn received(runtime: Arc<Runtime>, data: String) -> Result<()> {
-    runtime.send_raw(data.as_str()).await
+#[derive(Clone, Default)]
+struct Handler {
+    inter: Arc<std::sync::atomic::AtomicI32>,
+}
+
+impl runtime::Handler for Handler {
+    fn process(&self, runtime: Runtime, message: Message) -> Result<()> {
+        match message.body.typo.as_str() {
+            "echo" => {
+                runtime.spawn(received(runtime.clone(), self.clone(), message));
+                Ok(())
+            }
+            _ => bail!("unknown message type: {}", message.body.typo),
+        }
+    }
+}
+
+async fn received(runtime: Runtime, handler: Handler, data: Message) -> Result<()> {
+    let i = handler
+        .inter
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if i >= 10 {
+        return runtime
+            .send(data, MessageBody::from_str_error(1, "blah"))
+            .await;
+    }
+    runtime
+        .reply(
+            data,
+            EchoResponse {
+                typo: "echo_ok".to_string(),
+                echo: "a".to_string(),
+            },
+        )
+        .await
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Default)]
+struct EchoResponse {
+    #[serde(rename = "type")]
+    typo: String,
+    echo: String,
 }

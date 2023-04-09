@@ -2,8 +2,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
-use std::collections::HashMap;
+use serde_json::{Map, Value};
 
 /// Message represents a message sent from Src node to Dest node.
 /// The body is stored as parsed MessageBody along with the original string
@@ -40,7 +39,7 @@ pub struct MessageBody {
 
     /// All the fields not mentioned here
     #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
+    pub extra: Map<String, Value>,
 
     /// Original body message
     #[serde(skip)]
@@ -73,23 +72,55 @@ impl Message {
 }
 
 impl MessageBody {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// RPCError returns the RPC error from the message body.
     /// Returns a malformed body as a generic crash error.
-    fn rpc_error<T>(self: &Self) -> T {
+    pub fn rpc_error<T>(self: &Self) -> T {
         panic!("TODO")
     }
-}
 
-// HandlerFunc is the function signature for a message handler.
-// type HandlerFunc = dyn FnOnce(Runtime, Message) -> dyn Future<Output = Error>;
+    pub fn from_error() -> Self {
+        panic!("TODO")
+    }
+
+    pub fn with_type(self, typ: &str) -> Self {
+        let mut t = self;
+        t.typo = typ.to_string();
+        return t;
+    }
+
+    pub fn with_str_error(self, code: i32, err: &str) -> Self {
+        let mut t = self;
+        t.code = code;
+        t.text = err.to_string();
+        return t;
+    }
+
+    pub fn with_reply_to(self, in_reply_to: i32) -> Self {
+        let mut t = self;
+        t.in_reply_to = in_reply_to;
+        return t;
+    }
+
+    pub fn from_str_error(code: i32, err: &str) -> Self {
+        Self::new().with_type("error").with_str_error(code, err)
+    }
+
+    pub fn from_extra(extra: Map<String, Value>) -> Self {
+        let mut t = Self::default();
+        t.extra = extra;
+        return t;
+    }
+}
 
 #[cfg(test)]
 mod test {
     use crate::protocol::{InitMessageBody, Message, MessageBody};
-    use serde_json::Value;
-    use std::collections::HashMap;
-
-    type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+    use crate::runtime::Result;
+    use serde_json::{Map, Value};
 
     #[test]
     fn parse_message() -> Result<()> {
@@ -107,7 +138,7 @@ mod test {
                     in_reply_to: 0,
                     code: 0,
                     text: "".to_string(),
-                    extra: HashMap::from([(
+                    extra: Map::from_iter([(
                         "echo".to_string(),
                         Value::String("Please echo 35".to_string())
                     )]),
