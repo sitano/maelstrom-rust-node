@@ -48,6 +48,18 @@ pub struct MembershipState {
 }
 
 impl Runtime {
+    pub fn init<F: Future>(future: F) -> F::Output {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let _guard = runtime.enter();
+
+        crate::log::builder().init();
+        debug!("inited");
+
+        runtime.block_on(future)
+    }
+}
+
+impl Runtime {
     pub fn new() -> Self {
         return Runtime {
             inter: Arc::new(Inter {
@@ -104,13 +116,17 @@ impl Runtime {
     where
         T: Serialize,
     {
-        let extra = match serde_json::to_value(resp) {
+        let mut extra = match serde_json::to_value(resp) {
             Ok(v) => match v {
                 Value::Object(m) => m,
                 _ => bail!("response object has invalid serde_json::Value kind"),
             },
             Err(e) => bail!("response object is invalid, can't convert: {}", e),
         };
+
+        if !extra.contains_key("type") && !req.body.typo.is_empty() {
+            extra.insert("type".to_string(), Value::String(req.body.typo + "_ok"));
+        }
 
         // TODO: if extra type is empty, use req.body.typ + _ok
         // TODO: msg id

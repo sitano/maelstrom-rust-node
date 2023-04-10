@@ -1,20 +1,12 @@
-use log::debug;
 use maelstrom::protocol::{Message, MessageBody};
-use maelstrom::{log_util, Result};
-use maelstrom::{Node, Runtime};
+use maelstrom::{Node, Result, Runtime};
 use serde::Serialize;
 use simple_error::bail;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 pub(crate) fn main() -> Result<()> {
-    log_util::builder().init();
-    debug!("inited");
-
-    let runtime = tokio::runtime::Runtime::new()?;
-    let _guard = runtime.enter();
-
-    runtime.block_on(try_main())
+    Runtime::init(try_main())
 }
 
 async fn try_main() -> Result<()> {
@@ -40,22 +32,20 @@ impl Node for Handler {
 }
 
 async fn received(runtime: Runtime, handler: Handler, data: Message) -> Result<()> {
-    let i = handler.inter.fetch_add(1, Ordering::SeqCst);
-    if i > 1 {
+    if handler.inter.fetch_add(1, Ordering::SeqCst) > 0 {
         let body = MessageBody::from_str_error(1, "blah");
-        return runtime.send(data, body).await;
+        return runtime.reply(data, body).await;
     }
 
     let resp = EchoResponse {
-        typo: "echo_ok".to_string(),
-        echo: "a".to_string(),
+        echo: format!("Please echo {}", data.body.msg_id),
     };
     runtime.reply(data, resp).await
 }
 
+/// Putting `#[serde(rename = "type")] typo: String` is not necessary,
+/// as it is auto-deducted.
 #[derive(Serialize)]
 struct EchoResponse {
-    #[serde(rename = "type")]
-    typo: String,
     echo: String,
 }
