@@ -4,14 +4,15 @@ use crate::protocol::{Message, MessageBody};
 use crate::waitgroup::WaitGroup;
 use async_trait::async_trait;
 use futures::FutureExt;
-use log::{debug, info};
+use log::{debug, error, info};
 use serde::Serialize;
 use serde_json::Value;
 use simple_error::bail;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader, Stdout};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
+use tokio::select;
+use tokio::sync::{mpsc, Mutex, OnceCell};
 use tokio::task::JoinHandle;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -181,38 +182,76 @@ impl Runtime {
     }
 
     pub async fn run(self: &Self) -> Result<()> {
-        let stdin = BufReader::new(stdin());
+        return self.run_with(BufReader::new(stdin())).await;
+    }
+
+    pub async fn run_with<R>(self: &Self, input: BufReader<R>) -> Result<()>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let stdin = input;
+
+        let (tx_err, mut rx_err) = mpsc::channel::<Result<()>>(1);
+        let mut tx_out: Result<()> = Ok(());
 
         let mut lines_from_stdin = stdin.lines();
-        while let Some(line) = lines_from_stdin.next_line().await? {
-            if line.is_empty() {
-                continue;
+        loop {
+            select! {
+                Ok(read) = lines_from_stdin.next_line().fuse() => {
+                    match read {
+                        Some(line) =>{
+                            if line.trim().is_empty() {
+                                continue;
+                            }
+
+                            info!("Received {}", line);
+
+                            // TODO: error message to inc line
+                            let msg = serde_json::from_str::<Message>(line.as_str())?;
+                            // TODO: msg.body.raw set
+                            self.spawn(Self::process_request(self.clone(), msg, tx_err.clone()));
+                            // TODO: not init-ed
+                        }
+                        None => break
+                    }
+                },
+                Some(e) = rx_err.recv() => {
+                    tx_out = e;
+                    rx_err.close();
+                    break
+                },
+                else => break
             }
-
-            info!("Received {}", line);
-
-            // TODO: error message to inc line
-            let msg = serde_json::from_str::<Message>(line.as_str())?;
-            // TODO: msg.body.raw set
-            self.spawn(Self::process_request(self.clone(), msg));
-            // TODO: not init-ed
         }
 
-        self.done().await;
+        select! {
+            _ = self.done() => {},
+            Some(e) = rx_err.recv() => {
+                tx_out = e;
+                rx_err.close();
+            }
+        }
+
+        if let Err(e) = tx_out {
+            debug!("node error: {}", e);
+            return Err(e);
+        }
 
         // TODO: print stats?
-        debug!("done");
+        debug!("node done");
 
         Ok(())
     }
 
-    async fn process_request(runtime: Runtime, req: Message) -> Result<()> {
+    async fn process_request(runtime: Runtime, req: Message, tx_err: mpsc::Sender<Result<()>>) {
+        // TODO: handle init message
         if let Some(handler) = runtime.inter.handler.get() {
-            return handler.process(runtime.clone(), req).await;
-            // TODO: exit on error
+            let res = handler.process(runtime.clone(), req).await;
+            if let Err(e) = res {
+                error!("process_request error: {}", e);
+                tx_err.send(Err(e)).await.unwrap();
+            }
         }
-
-        Ok(())
     }
 }
 
@@ -259,6 +298,8 @@ impl Node for EchoNode {
 mod test {
     use crate::{MembershipState, Result, Runtime};
     use log::debug;
+    use tokio::io::BufReader;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn membership() -> Result<()> {
@@ -297,12 +338,18 @@ mod test {
     }
 
     #[tokio::test]
-    async fn io_failure() -> Result<()> {
+    async fn io_failure() {
         let handler = std::sync::Arc::new(crate::IOFailingNode::default());
         let runtime = Runtime::new().with_handler(handler);
-        let _run = runtime.run();
-        // TODO: send
-        // TODO: run.await
-        Ok(())
+        let cursor = std::io::Cursor::new(
+            r#"
+            
+            {"src":"c0","dest":"n0","body":{"type":"echo","msg_id":1}}
+            "#,
+        );
+        let token = CancellationToken::new();
+        runtime.spawn(async move { token.cancelled().await });
+        let run = runtime.run_with(BufReader::new(cursor));
+        assert!(matches!(run.await, Err(_)));
     }
 }
