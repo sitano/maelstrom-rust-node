@@ -15,20 +15,20 @@ use tokio::task::JoinHandle;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-pub struct Runtime {
+pub struct Runtime<T: Node<T>> {
     // we need an arc<> here to be able to pass runtime.clone() from &Self run() further
     // to the handler.
-    inter: Arc<Inter>,
+    inter: Arc<Inter<T>>,
 }
 
-struct Inter {
+struct Inter<T: Node<T>> {
     // OnceCell seems works better here than RwLock, but what do we think of cluster membership change?
     // How the API should behave if the Maelstrom will send the second init message?
     // Let's pick the approach when it is possible to only once initialize a node and a cluster
     // membership change must start a new node and stop the old ones.
     membership: OnceCell<MembershipState>,
 
-    handler: OnceCell<Arc<dyn Node + Sync + Send>>,
+    handler: OnceCell<Arc<T>>,
 
     out: Mutex<Stdout>,
 
@@ -36,9 +36,11 @@ struct Inter {
 }
 
 // Handler is the trait that implements message handling.
-pub trait Node {
-    // TODO: can we have async process instead?
-    fn process(self: &Self, runtime: Runtime, message: Message) -> Result<()>;
+pub trait Node<T>: Send + Sync
+where
+    T: Node<T>,
+{
+    async fn process(self: &Self, runtime: Runtime<T>, message: Message) -> Result<()>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -47,22 +49,20 @@ pub struct MembershipState {
     pub nodes: Vec<String>,
 }
 
-impl Runtime {
-    pub fn init<F: Future>(future: F) -> F::Output {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let _guard = runtime.enter();
+pub fn init<F: Future>(future: F) -> F::Output {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let _guard = runtime.enter();
 
-        crate::log::builder().init();
-        debug!("inited");
+    crate::log::builder().init();
+    debug!("inited");
 
-        runtime.block_on(future)
-    }
+    runtime.block_on(future)
 }
 
-impl Runtime {
+impl<T: Node<T> + 'static> Runtime<T> {
     pub fn new() -> Self {
         return Runtime {
-            inter: Arc::new(Inter {
+            inter: Arc::new(Inter::<T> {
                 membership: OnceCell::new(),
                 handler: OnceCell::new(),
                 out: Mutex::new(stdout()),
@@ -71,7 +71,7 @@ impl Runtime {
         };
     }
 
-    pub fn with_handler(self, handler: Arc<dyn Node + Send + Sync>) -> Self {
+    pub fn with_handler(self, handler: Arc<T>) -> Self {
         if let Err(_) = self.inter.handler.set(handler) {
             panic!("runtime handler is already initialized");
         }
@@ -88,9 +88,9 @@ impl Runtime {
         Ok(())
     }
 
-    pub async fn send<T>(self: &Self, req: Message, resp: T) -> Result<()>
+    pub async fn send<K>(self: &Self, req: Message, resp: K) -> Result<()>
     where
-        T: Serialize,
+        K: Serialize,
     {
         let extra = match serde_json::to_value(resp) {
             Ok(v) => match v {
@@ -112,9 +112,9 @@ impl Runtime {
         return self.send_raw(answer.as_str()).await;
     }
 
-    pub async fn reply<T>(self: &Self, req: Message, resp: T) -> Result<()>
+    pub async fn reply<K>(self: &Self, req: Message, resp: K) -> Result<()>
     where
-        T: Serialize,
+        K: Serialize,
     {
         let mut extra = match serde_json::to_value(resp) {
             Ok(v) => match v {
@@ -142,10 +142,10 @@ impl Runtime {
     }
 
     #[track_caller]
-    pub fn spawn<T>(self: &Self, future: T) -> JoinHandle<T::Output>
+    pub fn spawn<K>(self: &Self, future: K) -> JoinHandle<K::Output>
     where
-        T: Future + Send + 'static,
-        T::Output: Send + 'static,
+        K: Future + Send + 'static,
+        K::Output: Send + 'static,
     {
         let h = self.inter.serving.clone();
         tokio::spawn(future.then(async move |x| {
@@ -193,8 +193,9 @@ impl Runtime {
             // TODO: error message to inc line
             let msg = serde_json::from_str::<Message>(line.as_str())?;
             // TODO: msg.body.raw set
+            self.spawn(process_request(self.clone(), msg));
             if let Some(handler) = self.inter.handler.get() {
-                handler.process(self.clone(), msg)?;
+                // self.spawn(ptr.process());
                 // TODO: exit on error
             }
             // TODO: not init-ed
@@ -209,7 +210,7 @@ impl Runtime {
     }
 }
 
-impl Clone for Runtime {
+impl<T: Node<T> + Sync + Send> Clone for Runtime<T> {
     fn clone(&self) -> Self {
         return Runtime {
             inter: self.inter.clone(),
@@ -217,9 +218,36 @@ impl Clone for Runtime {
     }
 }
 
+async fn process_request<T: Node<T> + Send + Sync + 'static>(
+    runtime: Runtime<T>,
+    req: Message,
+) -> Result<()> {
+    if let Some(handler) = runtime.inter.handler.get() {
+        return handler.process(runtime.clone(), req).await;
+        // TODO: exit on error
+    }
+
+    Ok(())
+}
+
+pub struct BlackHoleNode {}
+impl Node<BlackHoleNode> for BlackHoleNode {
+    async fn process(self: &Self, _: Runtime<BlackHoleNode>, _: Message) -> Result<()> {
+        Ok(())
+    }
+}
+
+pub struct EchoNode {}
+impl Node<EchoNode> for EchoNode {
+    async fn process(self: &Self, runtime: Runtime<EchoNode>, req: Message) -> Result<()> {
+        let resp = Value::Object(serde_json::Map::default());
+        runtime.reply(req, resp).await
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::{MembershipState, Result, Runtime};
+    use crate::{BlackHoleNode, MembershipState, Result, Runtime};
     use log::debug;
 
     #[test]
@@ -227,7 +255,7 @@ mod test {
         let tokio_runtime = tokio::runtime::Runtime::new()?;
         tokio_runtime.block_on(async move {
             // TODO: use fake stdout
-            let runtime = Runtime::new();
+            let runtime = Runtime::<BlackHoleNode>::new();
             let runtime0 = runtime.clone();
             let s1 = MembershipState::example("n0", &["n0", "n1"]);
             let s2 = MembershipState::example("n1", &["n0", "n1"]);
