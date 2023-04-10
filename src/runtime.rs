@@ -273,6 +273,7 @@ impl Node for BlackHoleNode {
     }
 }
 
+// TODO: make err customizable
 #[derive(Default, Copy, Clone, PartialEq, Eq, Debug)]
 pub struct IOFailingNode {}
 
