@@ -1,6 +1,7 @@
+use async_trait::async_trait;
 use maelstrom::protocol::{Message, MessageBody};
 use maelstrom::{Node, Result, Runtime};
-use serde::Serialize;
+use serde_json::{Map, Value};
 use simple_error::bail;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -19,12 +20,13 @@ struct Handler {
     inter: Arc<std::sync::atomic::AtomicI32>,
 }
 
+#[async_trait]
 impl Node for Handler {
-    fn process(&self, runtime: Runtime, message: Message) -> Result<()> {
+    async fn process(&self, runtime: Runtime, message: Message) -> Result<()> {
         match message.body.typo.as_str() {
             "echo" => {
-                runtime.spawn(received(runtime.clone(), self.clone(), message));
-                Ok(())
+                // runtime.spawn(received(runtime.clone(), self.clone(), message));
+                received(runtime.clone(), self.clone(), message).await
             }
             _ => bail!("unknown message type: {}", message.body.typo),
         }
@@ -37,15 +39,7 @@ async fn received(runtime: Runtime, handler: Handler, data: Message) -> Result<(
         return runtime.reply(data, body).await;
     }
 
-    let resp = EchoResponse {
-        echo: format!("Please echo {}", data.body.msg_id),
-    };
-    runtime.reply(data, resp).await
-}
-
-/// Putting `#[serde(rename = "type")] typo: String` is not necessary,
-/// as it is auto-deducted.
-#[derive(Serialize)]
-struct EchoResponse {
-    echo: String,
+    let echo = format!("Please echo {}", data.body.msg_id);
+    let msg = Value::Object(Map::from_iter([("echo".to_string(), Value::String(echo))]));
+    runtime.reply(data, msg).await
 }

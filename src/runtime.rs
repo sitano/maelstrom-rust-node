@@ -2,6 +2,7 @@
 
 use crate::protocol::{Message, MessageBody};
 use crate::waitgroup::WaitGroup;
+use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, info};
 use serde::Serialize;
@@ -28,7 +29,7 @@ struct Inter {
     // membership change must start a new node and stop the old ones.
     membership: OnceCell<MembershipState>,
 
-    handler: OnceCell<Arc<dyn Node + Sync + Send>>,
+    handler: OnceCell<Arc<dyn Node>>,
 
     out: Mutex<Stdout>,
 
@@ -36,9 +37,9 @@ struct Inter {
 }
 
 // Handler is the trait that implements message handling.
-pub trait Node {
-    // TODO: can we have async process instead?
-    fn process(self: &Self, runtime: Runtime, message: Message) -> Result<()>;
+#[async_trait]
+pub trait Node: Sync + Send {
+    async fn process(self: &Self, runtime: Runtime, request: Message) -> Result<()>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -193,10 +194,7 @@ impl Runtime {
             // TODO: error message to inc line
             let msg = serde_json::from_str::<Message>(line.as_str())?;
             // TODO: msg.body.raw set
-            if let Some(handler) = self.inter.handler.get() {
-                handler.process(self.clone(), msg)?;
-                // TODO: exit on error
-            }
+            self.spawn(Self::process_request(self.clone(), msg));
             // TODO: not init-ed
         }
 
@@ -207,6 +205,15 @@ impl Runtime {
 
         Ok(())
     }
+
+    async fn process_request(runtime: Runtime, req: Message) -> Result<()> {
+        if let Some(handler) = runtime.inter.handler.get() {
+            return handler.process(runtime.clone(), req).await;
+            // TODO: exit on error
+        }
+
+        Ok(())
+    }
 }
 
 impl Clone for Runtime {
@@ -214,6 +221,37 @@ impl Clone for Runtime {
         return Runtime {
             inter: self.inter.clone(),
         };
+    }
+}
+
+#[derive(Default, Copy, Clone, PartialEq, Eq, Debug)]
+pub struct BlackHoleNode {}
+
+#[async_trait]
+impl Node for BlackHoleNode {
+    async fn process(self: &Self, _: Runtime, _: Message) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Default, Copy, Clone, PartialEq, Eq, Debug)]
+pub struct IOFailingNode {}
+
+#[async_trait]
+impl Node for IOFailingNode {
+    async fn process(self: &Self, _: Runtime, _: Message) -> Result<()> {
+        bail!("IOFailingNode: process failed")
+    }
+}
+
+#[derive(Default, Copy, Clone, PartialEq, Eq, Debug)]
+pub struct EchoNode {}
+
+#[async_trait]
+impl Node for EchoNode {
+    async fn process(self: &Self, runtime: Runtime, req: Message) -> Result<()> {
+        let resp = Value::Object(serde_json::Map::default());
+        runtime.reply(req, resp).await
     }
 }
 
@@ -256,5 +294,15 @@ mod test {
                 nodes: s.iter().map(|x| x.to_string()).collect(),
             };
         }
+    }
+
+    #[tokio::test]
+    async fn io_failure() -> Result<()> {
+        let handler = std::sync::Arc::new(crate::IOFailingNode::default());
+        let runtime = Runtime::new().with_handler(handler);
+        let _run = runtime.run();
+        // TODO: send
+        // TODO: run.await
+        Ok(())
     }
 }

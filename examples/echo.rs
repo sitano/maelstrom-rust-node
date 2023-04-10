@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use maelstrom::protocol::Message;
 use maelstrom::{Node, Result, Runtime};
 use serde::Serialize;
@@ -16,24 +17,18 @@ async fn try_main() -> Result<()> {
 #[derive(Clone, Default)]
 struct Handler {}
 
+#[async_trait]
 impl Node for Handler {
-    fn process(&self, runtime: Runtime, message: Message) -> Result<()> {
-        match message.body.typo.as_str() {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        match req.body.typo.as_str() {
             "echo" => {
-                runtime.spawn(received(runtime.clone(), message));
-                Ok(())
+                let echo = format!("Please echo {}", req.body.msg_id);
+                let resp = EchoResponse { echo };
+                runtime.reply(req, resp).await
             }
-            _ => bail!("unknown message type: {}", message.body.typo),
+            _ => bail!("unknown message type: {}", req.body.typo),
         }
     }
-}
-
-async fn received(runtime: Runtime, data: Message) -> Result<()> {
-    let resp = EchoResponse {
-        echo: format!("Please echo {}", data.body.msg_id),
-    };
-
-    runtime.reply(data, resp).await
 }
 
 /// Putting `#[serde(rename = "type")] typo: String` is not necessary,
