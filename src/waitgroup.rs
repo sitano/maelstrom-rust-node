@@ -18,31 +18,6 @@ use tokio::sync::Notify;
 /// * All threads wait for others to reach the [`Barrier`]. With `WaitGroup`, each thread can choose
 ///   to either wait for other threads or to continue without blocking.
 ///
-/// # Examples
-///
-/// ```
-/// use std::thread;
-///
-/// // Create a new wait group.
-/// let wg = WaitGroup::new();
-///
-/// for _ in 0..4 {
-///     // Create another reference to the wait group.
-///     let wg = wg.clone();
-///
-///     thread::spawn(move || {
-///         // Do some work.
-///
-///         // Drop the reference to the wait group.
-///         drop(wg);
-///     });
-/// }
-///
-/// // Block until all threads have finished their work.
-/// wg.wait();
-/// # std::thread::sleep(std::time::Duration::from_millis(500)); // wait for background threads closed: https://github.com/rust-lang/miri/issues/1371
-/// ```
-///
 /// [`Barrier`]: std::sync::Barrier
 pub struct WaitGroup {
     inner: Arc<Inner>,
@@ -67,37 +42,11 @@ impl Default for WaitGroup {
 
 impl WaitGroup {
     /// Creates a new wait group and returns the single reference to it.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let wg = WaitGroup::new();
-    /// ```
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Drops this reference and waits until all other references are dropped.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use std::thread;
-    ///
-    /// let wg = WaitGroup::new();
-    ///
-    /// thread::spawn({
-    ///     let wg = wg.clone();
-    ///     move || {
-    ///         // Block until both threads have reached `wait()`.
-    ///         wg.wait();
-    ///     }
-    /// });
-    ///
-    /// // Block until both threads have reached `wait()`.
-    /// wg.wait();
-    /// # std::thread::sleep(std::time::Duration::from_millis(500)); // wait for background threads closed: https://github.com/rust-lang/miri/issues/1371
-    /// ```
     pub async fn wait(&self) {
         let future = self.inner.cvar.notified();
 

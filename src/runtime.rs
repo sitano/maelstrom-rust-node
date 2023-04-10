@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::protocol::{Message, MessageBody};
-use crate::WaitGroup;
+use crate::waitgroup::WaitGroup;
 use futures::FutureExt;
 use log::{debug, info};
 use serde::Serialize;
@@ -28,7 +28,7 @@ struct Inter {
     // membership change must start a new node and stop the old ones.
     membership: OnceCell<MembershipState>,
 
-    handler: OnceCell<Arc<dyn Handler + Sync + Send>>,
+    handler: OnceCell<Arc<dyn Node + Sync + Send>>,
 
     out: Mutex<Stdout>,
 
@@ -36,7 +36,7 @@ struct Inter {
 }
 
 // Handler is the trait that implements message handling.
-pub trait Handler {
+pub trait Node {
     // TODO: can we have async process instead?
     fn process(self: &Self, runtime: Runtime, message: Message) -> Result<()>;
 }
@@ -59,7 +59,7 @@ impl Runtime {
         };
     }
 
-    pub fn with_handler(self, handler: Arc<dyn Handler + Send + Sync>) -> Self {
+    pub fn with_handler(self, handler: Arc<dyn Node + Send + Sync>) -> Self {
         if let Err(_) = self.inter.handler.set(handler) {
             panic!("runtime handler is already initialized");
         }
@@ -203,8 +203,7 @@ impl Clone for Runtime {
 
 #[cfg(test)]
 mod test {
-    use crate::runtime::{MembershipState, Result};
-    use crate::Runtime;
+    use crate::{MembershipState, Result, Runtime};
     use log::debug;
 
     #[test]
