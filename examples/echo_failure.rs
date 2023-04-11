@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use maelstrom::protocol::{Message, MessageBody};
+use maelstrom::protocol::{ErrorMessageBody, Message};
 use maelstrom::{Node, Result, Runtime};
 use serde_json::{Map, Value};
 use std::sync::atomic::Ordering;
@@ -24,7 +24,8 @@ impl Node for Handler {
     async fn process(&self, runtime: Runtime, message: Message) -> Result<()> {
         if message.get_type() == "echo" {
             if self.inter.fetch_add(1, Ordering::SeqCst) > 0 {
-                let body = MessageBody::from_str_error(1, "blah");
+                let err = maelstrom::Error::TemporarilyUnavailable {};
+                let body = ErrorMessageBody::from_error(err);
                 return runtime.reply(message, body).await;
             }
 

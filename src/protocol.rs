@@ -19,7 +19,7 @@ pub struct Message {
 pub struct MessageBody {
     /// Message type.
     #[serde(rename = "type", default, skip_serializing_if = "String::is_empty")]
-    pub typo: String,
+    pub typ: String,
 
     /// Optional. Message identifier that is unique to the source node.
     #[serde(default, skip_serializing_if = "u64_zero_by_ref")]
@@ -29,21 +29,9 @@ pub struct MessageBody {
     #[serde(default, skip_serializing_if = "u64_zero_by_ref")]
     pub in_reply_to: u64,
 
-    /// Error code, if an error occurred.
-    #[serde(default, skip_serializing_if = "i32_zero_by_ref")]
-    pub code: i32,
-
-    /// Error message, if an error occurred.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub text: String,
-
     /// All the fields not mentioned here
     #[serde(flatten)]
     pub extra: Map<String, Value>,
-}
-
-fn i32_zero_by_ref(num: &i32) -> bool {
-    *num == 0
 }
 
 fn u64_zero_by_ref(num: &u64) -> bool {
@@ -62,15 +50,25 @@ pub struct InitMessageBody {
     pub nodes: Vec<String>,
 }
 
-impl Message {
-    /// RPCError returns the RPC error from the message body.
-    /// Returns a malformed body as a generic crash error.
-    pub fn rpc_error<T>(self: &Self) -> T {
-        self.body.rpc_error()
-    }
+/// ErrorMessageBody represents the error response body.
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Default)]
+pub struct ErrorMessageBody {
+    /// Message type.
+    #[serde(rename = "type")]
+    pub typ: String,
 
+    /// Error code, if an error occurred.
+    #[serde(default)]
+    pub code: i32,
+
+    /// Error message, if an error occurred.
+    #[serde(default)]
+    pub text: String,
+}
+
+impl Message {
     pub fn get_type(self: &Self) -> &str {
-        return self.body.typo.as_str();
+        return self.body.typ.as_str();
     }
 }
 
@@ -79,26 +77,9 @@ impl MessageBody {
         Self::default()
     }
 
-    /// RPCError returns the RPC error from the message body.
-    /// Returns a malformed body as a generic crash error.
-    pub fn rpc_error<T>(self: &Self) -> T {
-        panic!("TODO")
-    }
-
-    pub fn from_error() -> Self {
-        panic!("TODO")
-    }
-
     pub fn with_type(self, typ: &str) -> Self {
         let mut t = self;
-        t.typo = typ.to_string();
-        return t;
-    }
-
-    pub fn with_str_error(self, code: i32, err: &str) -> Self {
-        let mut t = self;
-        t.code = code;
-        t.text = err.to_string();
+        t.typ = typ.to_string();
         return t;
     }
 
@@ -114,14 +95,24 @@ impl MessageBody {
         return t;
     }
 
-    pub fn from_str_error(code: i32, err: &str) -> Self {
-        Self::new().with_type("error").with_str_error(code, err)
-    }
-
     pub fn from_extra(extra: Map<String, Value>) -> Self {
         let mut t = Self::default();
         t.extra = extra;
         return t;
+    }
+}
+
+impl ErrorMessageBody {
+    pub fn new(code: i32, text: &str) -> Self {
+        return ErrorMessageBody {
+            typ: "error".to_string(),
+            code,
+            text: text.to_string(),
+        };
+    }
+
+    pub fn from_error(err: crate::Error) -> Self {
+        return err.into();
     }
 }
 

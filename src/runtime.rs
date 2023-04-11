@@ -129,8 +129,8 @@ impl Runtime {
             Err(e) => bail!("response object is invalid, can't convert: {}", e),
         };
 
-        if !extra.contains_key("type") && !req.body.typo.is_empty() {
-            extra.insert("type".to_string(), Value::String(req.body.typo + "_ok"));
+        if !extra.contains_key("type") && !req.body.typ.is_empty() {
+            extra.insert("type".to_string(), Value::String(req.body.typ + "_ok"));
         }
 
         let msg = Message {

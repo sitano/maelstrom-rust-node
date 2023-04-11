@@ -2,6 +2,11 @@
 
 Rust crate to implement https://github.com/jepsen-io/maelstrom / fly.io challenges.
 
+# What is Maelstrom?
+
+Maelstrom is a platform for learning distributed systems. It is build around Jepsen and Elle to ensure no properties are
+violated.
+
 # Features
 
 - async (tokio)
