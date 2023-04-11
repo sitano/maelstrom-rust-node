@@ -3,14 +3,14 @@ name = "maelstrom"
 
 [package]
 authors = ["Ivan Prisyazhnyy <john.koepi@gmail.com>"]
-categories = ["asynchronous", "concurrency", "network-programming", "distributed-systems"]
-description = "Maelstrom Rust framework"
-keywords = ["async", "await", "future", "std", "task"]
-license = "MIT"
+categories = ["asynchronous", "concurrency", "network-programming", "distributed-systems", "simulation"]
+description = "Maelstrom Rust node framework"
+keywords = ["maelstrom", "fly-io", "distributed-systems", "testing"]
+license = "EPL-2.0"
 edition = "2021"
-name = "maelstrom-rust"
+name = "maelstrom-node"
 readme = "README.md"
-repository = "https://github.com/sitano/maelstrom-rust-demo"
+repository = "https://github.com/sitano/maelstrom-rust-node"
 version = "0.1.0"
 
 [dependencies]

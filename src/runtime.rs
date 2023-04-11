@@ -1,10 +1,11 @@
 #![allow(dead_code)]
 
+use crate::error::Error;
 use crate::protocol::{InitMessageBody, Message, MessageBody};
 use crate::waitgroup::WaitGroup;
 use async_trait::async_trait;
 use futures::FutureExt;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::Serialize;
 use serde_json::Value;
 use simple_error::bail;
@@ -213,9 +214,12 @@ impl Runtime {
                             let tx_err0 = tx_err.clone();
                             self.spawn(Self::process_request(self.clone(), line).then(async move |result| {
                                 if let Err(e) = result {
-                                    error!("process_request error: {}", e);
-                                    let _ = tx_err0.send(Err(e)).await;
-                                    return;
+                                    if let Some(Error::NotSupported(t)) = e.downcast_ref::<Error>() {
+                                        warn!("message type not supported: {}", t);
+                                    } else {
+                                        error!("process_request error: {}", e);
+                                        let _ = tx_err0.send(Err(e)).await;
+                                    }
                                 }
                             }));
                         }
@@ -270,6 +274,7 @@ impl Runtime {
         if let Some(handler) = runtime.inter.handler.get() {
             let res = handler.process(runtime.clone(), msg).await;
             if res.is_err() {
+                // TODO: do not exit if it is not supported from is_init
                 return res;
             }
         }
