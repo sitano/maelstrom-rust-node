@@ -107,16 +107,11 @@ impl Runtime {
             Err(e) => bail!("response object is invalid, can't convert: {}", e),
         };
 
-        let lack_msg_id = !extra.contains_key("msg_id");
-        let mut msg = Message {
+        let msg = Message {
             src: req.dest,
             dest: req.src,
             body: MessageBody::from_extra(extra),
         };
-
-        if lack_msg_id {
-            msg.body.msg_id = self.inter.msg_id.fetch_add(1, AcqRel);
-        }
 
         let answer = serde_json::to_string(&msg)?;
         return self.send_raw(answer.as_str()).await;
@@ -138,11 +133,10 @@ impl Runtime {
             extra.insert("type".to_string(), Value::String(req.body.typo + "_ok"));
         }
 
-        let id = self.inter.msg_id.fetch_add(1, AcqRel);
         let msg = Message {
             src: req.dest,
             dest: req.src,
-            body: MessageBody::from_extra(extra).with_reply_to(id, req.body.msg_id),
+            body: MessageBody::from_extra(extra).with_reply_to(req.body.msg_id),
         };
 
         let answer = serde_json::to_string(&msg)?;
@@ -284,7 +278,7 @@ impl Runtime {
             let init_source_msg = init_source.unwrap();
             let init_resp: Value = serde_json::from_str(
                 format!(
-                    r#"{{"msg_id":0,"in_reply_to":{},"type":"init_ok"}}"#,
+                    r#"{{"in_reply_to":{},"type":"init_ok"}}"#,
                     init_source_msg.body.msg_id
                 )
                 .as_str(),
@@ -302,6 +296,10 @@ impl Runtime {
             node_id: init.node_id,
             nodes: init.nodes,
         })
+    }
+
+    pub fn next_msg_id(self: &Self) -> u64 {
+        return self.inter.msg_id.fetch_add(1, AcqRel);
     }
 }
 

@@ -61,7 +61,7 @@ struct Handler {}
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
         if req.get_type() == "echo" {
-            let echo = req.body.extra.clone();
+            let echo = req.body.clone().with_type("echo_ok");
             return runtime.reply(req, echo).await;
         }
 

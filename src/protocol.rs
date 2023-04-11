@@ -102,9 +102,8 @@ impl MessageBody {
         return t;
     }
 
-    pub fn with_reply_to(self, msg_id: u64, in_reply_to: u64) -> Self {
+    pub fn with_reply_to(self, in_reply_to: u64) -> Self {
         let mut t = self;
-        t.msg_id = msg_id;
         t.in_reply_to = in_reply_to;
         return t;
     }
