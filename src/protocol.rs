@@ -22,12 +22,12 @@ pub struct MessageBody {
     pub typo: String,
 
     /// Optional. Message identifier that is unique to the source node.
-    #[serde(default, skip_serializing_if = "i32_zero_by_ref")]
-    pub msg_id: i32,
+    #[serde(default, skip_serializing_if = "u64_zero_by_ref")]
+    pub msg_id: u64,
 
     /// Optional. For request/response, the msg_id of the request.
-    #[serde(default, skip_serializing_if = "i32_zero_by_ref")]
-    pub in_reply_to: i32,
+    #[serde(default, skip_serializing_if = "u64_zero_by_ref")]
+    pub in_reply_to: u64,
 
     /// Error code, if an error occurred.
     #[serde(default, skip_serializing_if = "i32_zero_by_ref")]
@@ -40,14 +40,13 @@ pub struct MessageBody {
     /// All the fields not mentioned here
     #[serde(flatten)]
     pub extra: Map<String, Value>,
-
-    /// Original body message
-    #[serde(skip)]
-    pub raw: String,
 }
 
-/// This is only used for serialize
 fn i32_zero_by_ref(num: &i32) -> bool {
+    *num == 0
+}
+
+fn u64_zero_by_ref(num: &u64) -> bool {
     *num == 0
 }
 
@@ -103,9 +102,16 @@ impl MessageBody {
         return t;
     }
 
-    pub fn with_reply_to(self, in_reply_to: i32) -> Self {
+    pub fn with_reply_to(self, msg_id: u64, in_reply_to: u64) -> Self {
         let mut t = self;
+        t.msg_id = msg_id;
         t.in_reply_to = in_reply_to;
+        return t;
+    }
+
+    pub fn and_msg_id(self, msg_id: u64) -> Self {
+        let mut t = self;
+        t.msg_id = msg_id;
         return t;
     }
 
@@ -130,20 +136,17 @@ mod test {
     fn parse_message() -> Result<()> {
         let echo = r#"{ "src": "c1", "dest": "n1", "body": { "type": "echo", "msg_id": 1, "echo": "Please echo 35" }}"#;
 
-        let mut msg: Message = serde_json::from_str(&echo)?;
-        msg.body.raw = serde_json::to_string(&msg.body)?;
-
-        let mut expected = Message {
+        let msg = serde_json::from_str::<Message>(&echo)?;
+        let expected = Message {
             src: "c1".to_string(),
             dest: "n1".to_string(),
             body: MessageBody::from_extra(Map::from_iter([(
                 "echo".to_string(),
                 Value::String("Please echo 35".to_string()),
             )]))
-            .with_type("echo"),
+            .with_type("echo")
+            .and_msg_id(1),
         };
-        expected.body.msg_id = 1;
-        expected.body.raw = r#"{"type":"echo","msg_id":1,"echo":"Please echo 35"}"#.to_string();
         assert_eq!(msg, expected);
         Ok(())
     }

@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde_json::Value;
 use simple_error::bail;
 use std::future::Future;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::{AcqRel, Release};
 use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
 use tokio::select;
@@ -24,6 +26,8 @@ pub struct Runtime {
 }
 
 struct Inter {
+    msg_id: AtomicU64,
+
     // OnceCell seems works better here than RwLock, but what do we think of cluster membership change?
     // How the API should behave if the Maelstrom will send the second init message?
     // Let's pick the approach when it is possible to only once initialize a node and a cluster
@@ -65,6 +69,7 @@ impl Runtime {
     pub fn new() -> Self {
         return Runtime {
             inter: Arc::new(Inter {
+                msg_id: AtomicU64::new(1),
                 membership: OnceCell::new(),
                 handler: OnceCell::new(),
                 out: Mutex::new(stdout()),
@@ -102,13 +107,16 @@ impl Runtime {
             Err(e) => bail!("response object is invalid, can't convert: {}", e),
         };
 
-        // TODO: msg id
-
-        let msg = Message {
+        let lack_msg_id = !extra.contains_key("msg_id");
+        let mut msg = Message {
             src: req.dest,
             dest: req.src,
             body: MessageBody::from_extra(extra),
         };
+
+        if lack_msg_id {
+            msg.body.msg_id = self.inter.msg_id.fetch_add(1, AcqRel);
+        }
 
         let answer = serde_json::to_string(&msg)?;
         return self.send_raw(answer.as_str()).await;
@@ -130,13 +138,11 @@ impl Runtime {
             extra.insert("type".to_string(), Value::String(req.body.typo + "_ok"));
         }
 
-        // TODO: if extra type is empty, use req.body.typ + _ok
-        // TODO: msg id
-
+        let id = self.inter.msg_id.fetch_add(1, AcqRel);
         let msg = Message {
             src: req.dest,
             dest: req.src,
-            body: MessageBody::from_extra(extra).with_reply_to(req.body.msg_id),
+            body: MessageBody::from_extra(extra).with_reply_to(id, req.body.msg_id),
         };
 
         let answer = serde_json::to_string(&msg)?;
@@ -174,6 +180,10 @@ impl Runtime {
         if let Err(e) = self.inter.membership.set(state) {
             bail!("membership is inited: {}", e);
         }
+
+        // new node = new message sequence
+        self.inter.msg_id.store(1, Release);
+
         Ok(())
     }
 
@@ -206,31 +216,28 @@ impl Runtime {
 
                             info!("Received {}", line);
 
-                            // TODO: error message to inc line
-                            let msg = serde_json::from_str::<Message>(line.as_str())?;
-                            // TODO: msg.body.raw set
-                            self.spawn(Self::process_request(self.clone(), msg, tx_err.clone()));
-                            // TODO: not init-ed
+                            self.spawn(Self::process_request(self.clone(), line, tx_err.clone()));
                         }
                         None => break
                     }
                 },
-                Some(e) = rx_err.recv() => {
-                    tx_out = e;
-                    rx_err.close();
-                    break
-                },
+                Some(e) = rx_err.recv() => { tx_out = e; break },
                 else => break
             }
         }
 
         select! {
             _ = self.done() => {},
-            Some(e) = rx_err.recv() => {
-                tx_out = e;
-                rx_err.close();
+            Some(e) = rx_err.recv() => tx_out = e,
+        }
+
+        if tx_out.is_ok() {
+            if let Ok(err) = rx_err.try_recv() {
+                tx_out = err;
             }
         }
+
+        rx_err.close();
 
         if let Err(e) = tx_out {
             debug!("node error: {}", e);
@@ -243,13 +250,22 @@ impl Runtime {
         Ok(())
     }
 
-    async fn process_request(runtime: Runtime, req: Message, tx_err: mpsc::Sender<Result<()>>) {
+    async fn process_request(runtime: Runtime, line: String, tx_err: mpsc::Sender<Result<()>>) {
+        let msg = match serde_json::from_str::<Message>(line.as_str()) {
+            Ok(v) => v,
+            Err(err) => {
+                error!("process_request error: {}", err);
+                let _ = tx_err.send(Err(Box::new(err))).await;
+                return;
+            }
+        };
+
         // TODO: handle init message
         if let Some(handler) = runtime.inter.handler.get() {
-            let res = handler.process(runtime.clone(), req).await;
+            let res = handler.process(runtime.clone(), msg).await;
             if let Err(e) = res {
                 error!("process_request error: {}", e);
-                tx_err.send(Err(e)).await.unwrap();
+                let _ = tx_err.send(Err(e)).await;
             }
         }
     }
@@ -298,7 +314,6 @@ impl Node for EchoNode {
 #[cfg(test)]
 mod test {
     use crate::{MembershipState, Result, Runtime};
-    use log::debug;
     use tokio::io::BufReader;
     use tokio_util::sync::CancellationToken;
 
@@ -306,14 +321,12 @@ mod test {
     fn membership() -> Result<()> {
         let tokio_runtime = tokio::runtime::Runtime::new()?;
         tokio_runtime.block_on(async move {
-            // TODO: use fake stdout
             let runtime = Runtime::new();
             let runtime0 = runtime.clone();
             let s1 = MembershipState::example("n0", &["n0", "n1"]);
             let s2 = MembershipState::example("n1", &["n0", "n1"]);
             runtime.spawn(async move {
                 runtime0.set_membership_state(s1).unwrap();
-                debug!("{}", runtime0.node_id());
                 async move {
                     assert!(matches!(runtime0.set_membership_state(s2), Err(_)));
                 }

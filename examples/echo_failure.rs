@@ -28,7 +28,7 @@ impl Node for Handler {
                 return runtime.reply(message, body).await;
             }
 
-            let echo = format!("Please echo {}", message.body.msg_id);
+            let echo = format!("Another echo {}", message.body.msg_id);
             let msg = Value::Object(Map::from_iter([("echo".to_string(), Value::String(echo))]));
             return runtime.reply(message, msg).await;
         }
@@ -36,3 +36,10 @@ impl Node for Handler {
         Ok(())
     }
 }
+
+// Putting `#[serde(rename = "type")] typo: String` is not necessary,
+// as it is auto-deducted.
+// #[derive(Serialize)]
+// struct EchoResponse {
+//     echo: String,
+// }

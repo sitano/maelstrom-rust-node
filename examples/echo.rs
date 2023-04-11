@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use maelstrom::protocol::Message;
 use maelstrom::{Node, Result, Runtime};
-use serde::Serialize;
 use std::sync::Arc;
 
 pub(crate) fn main() -> Result<()> {
@@ -20,17 +19,10 @@ struct Handler {}
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
         if req.get_type() == "echo" {
-            let echo = format!("Please echo {}", req.body.msg_id);
-            return runtime.reply(req, EchoResponse { echo }).await;
+            let echo = req.body.extra.clone();
+            return runtime.reply(req, echo).await;
         }
 
         Ok(())
     }
-}
-
-/// Putting `#[serde(rename = "type")] typo: String` is not necessary,
-/// as it is auto-deducted.
-#[derive(Serialize)]
-struct EchoResponse {
-    echo: String,
 }
