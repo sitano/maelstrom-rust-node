@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::protocol::{Message, MessageBody};
+use crate::protocol::{InitMessageBody, Message, MessageBody};
 use crate::waitgroup::WaitGroup;
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -216,7 +216,14 @@ impl Runtime {
 
                             info!("Received {}", line);
 
-                            self.spawn(Self::process_request(self.clone(), line, tx_err.clone()));
+                            let tx_err0 = tx_err.clone();
+                            self.spawn(Self::process_request(self.clone(), line).then(async move |result| {
+                                if let Err(e) = result {
+                                    error!("process_request error: {}", e);
+                                    let _ = tx_err0.send(Err(e)).await;
+                                    return;
+                                }
+                            }));
                         }
                         None => break
                     }
@@ -250,24 +257,51 @@ impl Runtime {
         Ok(())
     }
 
-    async fn process_request(runtime: Runtime, line: String, tx_err: mpsc::Sender<Result<()>>) {
+    async fn process_request(runtime: Runtime, line: String) -> Result<()> {
         let msg = match serde_json::from_str::<Message>(line.as_str()) {
             Ok(v) => v,
-            Err(err) => {
-                error!("process_request error: {}", err);
-                let _ = tx_err.send(Err(Box::new(err))).await;
-                return;
-            }
+            Err(err) => return Err(Box::new(err)),
         };
 
-        // TODO: handle init message
-        if let Some(handler) = runtime.inter.handler.get() {
-            let res = handler.process(runtime.clone(), msg).await;
-            if let Err(e) = res {
-                error!("process_request error: {}", e);
-                let _ = tx_err.send(Err(e)).await;
+        let is_init = msg.get_type() == "init";
+        let mut init_source: Option<Message> = None;
+        if is_init {
+            init_source = Some(msg.clone());
+            let res = runtime.process_init(&msg);
+            if res.is_err() {
+                return res;
             }
         }
+
+        if let Some(handler) = runtime.inter.handler.get() {
+            let res = handler.process(runtime.clone(), msg).await;
+            if res.is_err() {
+                return res;
+            }
+        }
+
+        if is_init {
+            let init_source_msg = init_source.unwrap();
+            let init_resp: Value = serde_json::from_str(
+                format!(
+                    r#"{{"msg_id":0,"in_reply_to":{},"type":"init_ok"}}"#,
+                    init_source_msg.body.msg_id
+                )
+                .as_str(),
+            )?;
+            return runtime.send(init_source_msg, init_resp).await;
+        }
+
+        Ok(())
+    }
+
+    fn process_init(self: &Self, message: &Message) -> Result<()> {
+        let raw = message.body.extra.clone();
+        let init = serde_json::from_value::<InitMessageBody>(Value::Object(raw))?;
+        self.set_membership_state(MembershipState {
+            node_id: init.node_id,
+            nodes: init.nodes,
+        })
     }
 }
 
