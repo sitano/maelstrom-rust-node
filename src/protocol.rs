@@ -66,8 +66,12 @@ pub struct InitMessageBody {
 impl Message {
     /// RPCError returns the RPC error from the message body.
     /// Returns a malformed body as a generic crash error.
-    fn rpc_error<T>(self: &Self) -> T {
+    pub fn rpc_error<T>(self: &Self) -> T {
         self.body.rpc_error()
+    }
+
+    pub fn get_type(self: &Self) -> &str {
+        return self.body.typo.as_str();
     }
 }
 
@@ -124,43 +128,41 @@ mod test {
 
     #[test]
     fn parse_message() -> Result<()> {
-        let echo = "{ \"src\": \"c1\", \"dest\": \"n1\", \"body\": { \"type\": \"echo\", \"msg_id\": 1, \"echo\": \"Please echo 35\" }}";
+        let echo = r#"{ "src": "c1", "dest": "n1", "body": { "type": "echo", "msg_id": 1, "echo": "Please echo 35" }}"#;
+
         let mut msg: Message = serde_json::from_str(&echo)?;
         msg.body.raw = serde_json::to_string(&msg.body)?;
-        assert_eq!(
-            msg,
-            Message {
-                src: "c1".to_string(),
-                dest: "n1".to_string(),
-                body: MessageBody {
-                    typo: "echo".to_string(),
-                    msg_id: 1,
-                    in_reply_to: 0,
-                    code: 0,
-                    text: "".to_string(),
-                    extra: Map::from_iter([(
-                        "echo".to_string(),
-                        Value::String("Please echo 35".to_string())
-                    )]),
-                    raw: "{\"type\":\"echo\",\"msg_id\":1,\"echo\":\"Please echo 35\"}".to_string()
-                },
-            }
-        );
+
+        let mut expected = Message {
+            src: "c1".to_string(),
+            dest: "n1".to_string(),
+            body: MessageBody::from_extra(Map::from_iter([(
+                "echo".to_string(),
+                Value::String("Please echo 35".to_string()),
+            )]))
+            .with_type("echo"),
+        };
+        expected.body.msg_id = 1;
+        expected.body.raw = r#"{"type":"echo","msg_id":1,"echo":"Please echo 35"}"#.to_string();
+        assert_eq!(msg, expected);
         Ok(())
     }
 
     #[test]
     fn parse_init_message() -> Result<()> {
-        let init =
-            "{\"type\":\"init\",\"msg_id\":1,\"node_id\":\"n0\",\"node_ids\":[\"n0\",\"n1\"]}";
+        let init = r#"{"type":"init","msg_id":1,"node_id":"n0","node_ids":["n0","n1"]}"#;
         let msg: InitMessageBody = serde_json::from_str(&init)?;
-        assert_eq!(
-            msg,
-            InitMessageBody {
-                node_id: "n0".to_string(),
-                nodes: Vec::from(["n0".to_string(), "n1".to_string()]),
-            }
-        );
+        let expect = InitMessageBody::example("n0", &["n0", "n1"]);
+        assert_eq!(msg, expect);
         Ok(())
+    }
+
+    impl InitMessageBody {
+        fn example(n: &str, s: &[&str]) -> Self {
+            return InitMessageBody {
+                node_id: n.to_string(),
+                nodes: s.iter().map(|x| x.to_string()).collect(),
+            };
+        }
     }
 }
