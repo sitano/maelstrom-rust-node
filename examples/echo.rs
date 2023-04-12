@@ -23,6 +23,6 @@ impl Node for Handler {
             return runtime.reply(req, echo).await;
         }
 
-        Ok(())
+        Self::done(req)
     }
 }

@@ -34,7 +34,7 @@ impl Node for Handler {
             return runtime.reply(message, msg).await;
         }
 
-        Ok(())
+        Self::done(message)
     }
 }
 

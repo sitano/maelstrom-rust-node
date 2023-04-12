@@ -45,7 +45,56 @@ struct Inter {
 // Handler is the trait that implements message handling.
 #[async_trait]
 pub trait Node: Sync + Send {
+    /// Main handler function that processes incoming requests.
+    ///
+    /// Example:
+    ///
+    /// ```
+    /// use async_trait::async_trait;
+    /// use maelstrom::protocol::Message;
+    /// use maelstrom::{Node, Result, Runtime};
+    ///
+    /// struct Handler {}
+    ///
+    /// #[async_trait]
+    /// impl Node for Handler {
+    ///     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+    ///         if req.get_type() == "echo" {
+    ///             let echo = req.body.clone().with_type("echo_ok");
+    ///             return runtime.reply(req, echo).await;
+    ///         }
+    ///
+    ///         Self::done(req)
+    ///     }
+    /// }
+    /// ```
     async fn process(self: &Self, runtime: Runtime, request: Message) -> Result<()>;
+
+    /// Returns an result with NotSupported error meaning that Node.process()
+    /// is not aware of specific message type.
+    ///
+    /// Example:
+    ///
+    /// ```
+    /// use async_trait::async_trait;
+    /// use maelstrom::{Node, Runtime, Result};
+    /// use maelstrom::protocol::Message;
+    ///
+    /// struct Handler {}
+    ///
+    /// #[async_trait]
+    /// impl Node for Handler {
+    ///     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+    ///         Self::done(req)
+    ///     }
+    /// }
+    /// ```
+    fn done(message: Message) -> Result<()>
+    where
+        Self: Sized,
+    {
+        return Err(Box::new(Error::NotSupported(message.body.typ)));
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -179,6 +228,8 @@ impl Runtime {
         // new node = new message sequence
         self.inter.msg_id.store(1, Release);
 
+        debug!("new {:?}", self.inter.membership.get().unwrap());
+
         Ok(())
     }
 
@@ -273,8 +324,7 @@ impl Runtime {
 
         if let Some(handler) = runtime.inter.handler.get() {
             let res = handler.process(runtime.clone(), msg).await;
-            if res.is_err() {
-                // TODO: do not exit if it is not supported from is_init
+            if res.is_err() && !(is_init && Self::is_not_supported(&res)) {
                 return res;
             }
         }
@@ -303,6 +353,16 @@ impl Runtime {
         })
     }
 
+    #[inline]
+    fn is_not_supported(res: &Result<()>) -> bool {
+        let err = res.as_ref().err().unwrap();
+        match err.downcast_ref::<Error>() {
+            Some(Error::NotSupported(_)) => true,
+            _ => false,
+        }
+    }
+
+    #[inline]
     pub fn next_msg_id(self: &Self) -> u64 {
         return self.inter.msg_id.fetch_add(1, AcqRel);
     }

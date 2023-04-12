@@ -1,0 +1,12 @@
+{ "src": "c1", "dest": "n1", "body": { "type": "init", "node_id": "n0", "node_ids": ["n0", "n1"] }}
+
+{ "src": "c1", "dest": "n1", "body": { "type": "echo", "msg_id": 1, "echo": "Please echo 1" }}
+
+
+
+{ "src": "c1", "dest": "n1", "body": { "type": "echo1", "msg_id": 2, "echo": "Please echo 2" }}
+
+
+
+{ "src": "c1", "dest": "n1", "body": { "type": "echo", "msg_id": 3, "echo": "Please echo 3" }}
+{ "src": "c1", "dest": "n1", "body": { "type": "echo", "msg_id": 4, "echo": "Please echo 4" }}
