@@ -87,19 +87,61 @@ send back the same msg with body.type == echo_ok.
       }
     }
 
+## Broadcast
+
+```bash
+$ cargo build --examples
+$ RUST_LOG=debug maelstrom test -w broadcast --bin ./target/debug/examples/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
+````
+
+
 # API
+
+## RPC
+
+```rust
+use async_trait::async_trait;
+use maelstrom::protocol::Message;
+use maelstrom::{Node, Result, Runtime};
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Default)]
+struct Handler {}
+
+#[async_trait]
+impl Node for Handler {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        // 1.
+        runtime.spawn(Runtime::rpc(runtime.clone(), node.clone(), msg.clone()));
+        
+        // 2. put it into runtime.spawn(async move { ... }) if needed
+        let res: RPCResult = Runtime::rpc(runtime.clone(), node.clone(), msg.clone()).await?;
+        let _msg: Result<Message> = res.await;
+        
+        // 3. put it into runtime.spawn(async move { ... }) if needed
+        let mut res: RPCResult = Runtime::rpc(runtime.clone(), node.clone(), msg.clone()).await?;
+        let (mut ctx, _handler) = Context::with_timeout(Duration::from_secs(1));
+        let _msg: Message = res.done_with(ctx).await?;
+            
+        return runtime.reply_ok(req).await;
+    }
+}
+```
 
 ## Responses
 
 ```rust
 use async_trait::async_trait;
-use maelstrom::protocol::{Message, MessageBody};
-use maelstrom::{Node, Result, Runtime};
-use serde_json::{Map, Value};
-use std::sync::Arc;
+use log::info;
+use maelstrom::protocol::Message;
+use maelstrom::{done, Node, Result, Runtime};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
-struct Handler {}
+struct Handler { /* ... */ }
 
 #[async_trait]
 impl Node for Handler {
@@ -131,6 +173,26 @@ impl Node for Handler {
             return runtime.reply(message, EchoResponse { echo: "blah".to_string() }).await;
         }
 
+        if req.get_type() == "read" {
+            let data = self.inner.lock().unwrap().clone();
+            let msg = ReadResponse { messages: data };
+            return runtime.reply(req, msg).await;
+        }
+
+        if req.get_type() == "broadcast" {
+            let raw = Value::Object(req.body.extra.clone());
+
+            let mut msg = serde_json::from_value::<BroadcastRequest>(raw)?;
+            msg.typ = req.body.typ.clone();
+            
+            return runtime.reply_ok(req).await;
+        }
+
+        if req.get_type() == "topology" {
+            info!("new topology {:?}", req.body.extra.get("topology").unwrap());
+            return runtime.reply_ok(req).await;
+        }
+
         done(runtime, message)
     }
 }
@@ -142,6 +204,22 @@ struct EchoResponse {
     echo: String,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct BroadcastRequest {
+    #[serde(default, rename = "type")]
+    typ: String,
+    message: u64,
+}
+
+// #[derive(Deserialize)]
+// struct TopologyRequest {
+//     topology: HashMap<String, Vec<String>>,
+// }
+
+#[derive(Serialize)]
+struct ReadResponse {
+    messages: Vec<u64>,
+}
 ```
 
 # Why

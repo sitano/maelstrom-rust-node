@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::protocol::{ErrorMessageBody, InitMessageBody, Message, MessageBody};
 use crate::waitgroup::WaitGroup;
+use crate::RPCResult;
 use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -19,7 +20,6 @@ use tokio::select;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, oneshot, Mutex, OnceCell};
 use tokio::task::JoinHandle;
-use tokio_context::context::Context;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -210,7 +210,11 @@ impl Runtime {
         return self.send_raw(answer.as_str()).await;
     }
 
-    pub async fn rpc<T>(self: &Self, mut ctx: Context, to: String, resp: T) -> Result<Message>
+    pub async fn reply_ok(self: &Self, req: Message) -> Result<()> {
+        return self.reply(req, Runtime::empty_response()).await;
+    }
+
+    pub async fn rpc<T>(runtime: Runtime, to: String, resp: T) -> Result<RPCResult>
     where
         T: Serialize,
     {
@@ -222,34 +226,23 @@ impl Runtime {
             Err(e) => bail!("response object is invalid, can't convert: {}", e),
         };
 
-        let req_msg_id = self.next_msg_id();
+        let req_msg_id = runtime.next_msg_id();
         let req = Message {
-            src: self.node_id().to_string(),
+            src: runtime.node_id().to_string(),
             dest: to,
             body: MessageBody::from_extra(extra).and_msg_id(req_msg_id),
         };
 
         let (tx, rx) = oneshot::channel::<Message>();
-        let _ = self.inter.rpc.lock().await.insert(req_msg_id, tx);
+        let _ = runtime.inter.rpc.lock().await.insert(req_msg_id, tx);
 
         let req_str = serde_json::to_string(&req)?;
-        if let Err(err) = self.send_raw(req_str.as_str()).await {
-            self.inter.rpc.lock().await.remove(&req_msg_id);
+        if let Err(err) = runtime.send_raw(req_str.as_str()).await {
+            let _ = runtime.release_rpc_sender(req_msg_id).await;
             return Err(err);
         }
 
-        let result: Result<Message>;
-        select! {
-            data = rx => match data {
-                Ok(resp) => result = Ok(resp),
-                Err(err) => result = Err(Box::new(err)),
-            },
-            _ = ctx.done() => result = Err(Box::new(Error::Timeout)),
-        }
-
-        let _ = self.inter.rpc.lock().await.remove(&req_msg_id);
-
-        return result;
+        return Ok(RPCResult::new(req_msg_id, rx, runtime.clone()));
     }
 
     #[track_caller]
@@ -424,6 +417,16 @@ impl Runtime {
     #[inline]
     pub fn next_msg_id(self: &Self) -> u64 {
         return self.inter.msg_id.fetch_add(1, AcqRel);
+    }
+
+    #[inline]
+    pub fn empty_response() -> Value {
+        return Value::Object(serde_json::Map::default());
+    }
+
+    #[inline]
+    pub(crate) async fn release_rpc_sender(&self, id: u64) -> Option<Sender<Message>> {
+        return self.inter.rpc.lock().await.remove(&id);
     }
 }
 

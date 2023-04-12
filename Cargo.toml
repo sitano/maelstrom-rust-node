@@ -30,3 +30,6 @@ name = "echo"
 
 [[example]]
 name = "echo_failure"
+
+[[example]]
+name = "broadcast"
