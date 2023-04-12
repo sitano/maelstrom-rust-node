@@ -15,7 +15,7 @@ violated. With maelstrom you build nodes that form distributed system that can p
 - simple API - single trait fn to implement
 - response types auto-deduction, extra data available via Value()
 - unknown message types handling
-- TODO: rpc / timeout
+- rpc + timeout
 - TODO: kv
 
 # Examples

@@ -9,14 +9,17 @@ use log::{debug, error, info, warn};
 use serde::Serialize;
 use serde_json::Value;
 use simple_error::bail;
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::{AcqRel, Release};
 use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
 use tokio::select;
-use tokio::sync::{mpsc, Mutex, OnceCell};
+use tokio::sync::oneshot::Sender;
+use tokio::sync::{mpsc, oneshot, Mutex, OnceCell};
 use tokio::task::JoinHandle;
+use tokio_context::context::Context;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -36,6 +39,8 @@ struct Inter {
     membership: OnceCell<MembershipState>,
 
     handler: OnceCell<Arc<dyn Node>>,
+
+    rpc: Mutex<HashMap<u64, Sender<Message>>>,
 
     out: Mutex<Stdout>,
 
@@ -133,6 +138,7 @@ impl Runtime {
                 msg_id: AtomicU64::new(1),
                 membership: OnceCell::new(),
                 handler: OnceCell::new(),
+                rpc: Mutex::default(),
                 out: Mutex::new(stdout()),
                 serving: WaitGroup::new(),
             }),
@@ -202,6 +208,48 @@ impl Runtime {
 
         let answer = serde_json::to_string(&msg)?;
         return self.send_raw(answer.as_str()).await;
+    }
+
+    pub async fn rpc<T>(self: &Self, mut ctx: Context, to: String, resp: T) -> Result<Message>
+    where
+        T: Serialize,
+    {
+        let extra = match serde_json::to_value(resp) {
+            Ok(v) => match v {
+                Value::Object(m) => m,
+                _ => bail!("response object has invalid serde_json::Value kind"),
+            },
+            Err(e) => bail!("response object is invalid, can't convert: {}", e),
+        };
+
+        let req_msg_id = self.next_msg_id();
+        let req = Message {
+            src: self.node_id().to_string(),
+            dest: to,
+            body: MessageBody::from_extra(extra).and_msg_id(req_msg_id),
+        };
+
+        let (tx, rx) = oneshot::channel::<Message>();
+        let _ = self.inter.rpc.lock().await.insert(req_msg_id, tx);
+
+        let req_str = serde_json::to_string(&req)?;
+        if let Err(err) = self.send_raw(req_str.as_str()).await {
+            self.inter.rpc.lock().await.remove(&req_msg_id);
+            return Err(err);
+        }
+
+        let result: Result<Message>;
+        select! {
+            data = rx => match data {
+                Ok(resp) => result = Ok(resp),
+                Err(err) => result = Err(Box::new(err)),
+            },
+            _ = ctx.done() => result = Err(Box::new(Error::Timeout)),
+        }
+
+        let _ = self.inter.rpc.lock().await.remove(&req_msg_id);
+
+        return result;
     }
 
     #[track_caller]
@@ -323,6 +371,15 @@ impl Runtime {
             Err(err) => return Err(Box::new(err)),
         };
 
+        // rpc call
+        if msg.body.in_reply_to > 0 {
+            let mut guard = runtime.inter.rpc.lock().await;
+            if let Some(tx) = guard.remove(&msg.body.in_reply_to) {
+                let _ = tx.send(msg);
+            }
+            return Ok(());
+        }
+
         let is_init = msg.get_type() == "init";
         let mut init_source: Option<Message> = None;
         if is_init {
@@ -413,7 +470,9 @@ impl Node for EchoNode {
 #[cfg(test)]
 mod test {
     use crate::{MembershipState, Result, Runtime};
+    use std::time::Duration;
     use tokio::io::BufReader;
+    use tokio_context::context::Context;
     use tokio_util::sync::CancellationToken;
 
     #[test]
