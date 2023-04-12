@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::error::Error;
-use crate::protocol::{InitMessageBody, Message, MessageBody};
+use crate::protocol::{ErrorMessageBody, InitMessageBody, Message, MessageBody};
 use crate::waitgroup::WaitGroup;
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -52,7 +52,7 @@ pub trait Node: Sync + Send {
     /// ```
     /// use async_trait::async_trait;
     /// use maelstrom::protocol::Message;
-    /// use maelstrom::{Node, Result, Runtime};
+    /// use maelstrom::{Node, Result, Runtime, done};
     ///
     /// struct Handler {}
     ///
@@ -64,37 +64,48 @@ pub trait Node: Sync + Send {
     ///             return runtime.reply(req, echo).await;
     ///         }
     ///
-    ///         Self::done(req)
+    ///         // all other types are unsupported
+    ///         done(runtime, req)
     ///     }
     /// }
     /// ```
     async fn process(self: &Self, runtime: Runtime, request: Message) -> Result<()>;
+}
 
-    /// Returns an result with NotSupported error meaning that Node.process()
-    /// is not aware of specific message type.
-    ///
-    /// Example:
-    ///
-    /// ```
-    /// use async_trait::async_trait;
-    /// use maelstrom::{Node, Runtime, Result};
-    /// use maelstrom::protocol::Message;
-    ///
-    /// struct Handler {}
-    ///
-    /// #[async_trait]
-    /// impl Node for Handler {
-    ///     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
-    ///         Self::done(req)
-    ///     }
-    /// }
-    /// ```
-    fn done(message: Message) -> Result<()>
-    where
-        Self: Sized,
-    {
-        return Err(Box::new(Error::NotSupported(message.body.typ)));
+/// Returns a result with NotSupported error meaning that Node.process()
+/// is not aware of specific message type or Ok(()) for init.
+///
+/// Example:
+///
+/// ```
+/// use async_trait::async_trait;
+/// use maelstrom::{Node, Runtime, Result, done};
+/// use maelstrom::protocol::Message;
+///
+/// struct Handler {}
+///
+/// #[async_trait]
+/// impl Node for Handler {
+///     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+///         // would skip init and respond with Code == 10 for any other type.
+///         done(runtime, req)
+///     }
+/// }
+/// ```
+pub fn done(runtime: Runtime, message: Message) -> Result<()> {
+    if message.get_type() == "init" {
+        return Ok(());
     }
+
+    let err = Error::NotSupported(message.body.typ.clone());
+    let msg: ErrorMessageBody = err.clone().into();
+
+    let runtime0 = runtime.clone();
+    runtime.spawn(async move {
+        let _ = runtime0.reply(message, msg).await;
+    });
+
+    return Err(Box::new(err));
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -324,7 +335,7 @@ impl Runtime {
 
         if let Some(handler) = runtime.inter.handler.get() {
             let res = handler.process(runtime.clone(), msg).await;
-            if res.is_err() && !(is_init && Self::is_not_supported(&res)) {
+            if res.is_err() {
                 return res;
             }
         }
@@ -351,15 +362,6 @@ impl Runtime {
             node_id: init.node_id,
             nodes: init.nodes,
         })
-    }
-
-    #[inline]
-    fn is_not_supported(res: &Result<()>) -> bool {
-        let err = res.as_ref().err().unwrap();
-        match err.downcast_ref::<Error>() {
-            Some(Error::NotSupported(_)) => true,
-            _ => false,
-        }
     }
 
     #[inline]

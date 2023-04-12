@@ -14,6 +14,7 @@ violated. With maelstrom you build nodes that form distributed system that can p
 - multi-threading
 - simple API - single trait fn to implement
 - response types auto-deduction, extra data available via Value()
+- unknown message types handling
 - TODO: rpc / timeout
 - TODO: kv
 
@@ -54,7 +55,7 @@ impl Node for Handler {
             return runtime.reply(req, echo).await;
         }
 
-        Ok(())
+        done(runtime, message)
     }
 }
 ```
@@ -130,7 +131,7 @@ impl Node for Handler {
             return runtime.reply(message, EchoResponse { echo: "blah".to_string() }).await;
         }
 
-        Ok(())
+        done(runtime, message)
     }
 }
 

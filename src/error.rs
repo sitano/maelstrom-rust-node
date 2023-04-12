@@ -97,7 +97,11 @@ impl Into<ErrorMessageBody> for Error {
         return ErrorMessageBody {
             typ: "error".to_string(),
             code: self.code(),
-            text: self.description().to_string(),
+            text: match self {
+                Error::NotSupported(t) => format!("{} message type is not supported", t),
+                Error::Custom(id, t) => format!("error({}): {}", id, t),
+                o => o.description().to_string(),
+            },
         };
     }
 }

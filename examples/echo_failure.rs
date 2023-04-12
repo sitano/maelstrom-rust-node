@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use maelstrom::protocol::{ErrorMessageBody, Message};
-use maelstrom::{Node, Result, Runtime};
+use maelstrom::{done, Node, Result, Runtime};
 use serde_json::{Map, Value};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ impl Node for Handler {
             return runtime.reply(message, msg).await;
         }
 
-        Self::done(message)
+        done(runtime, message)
     }
 }
 
