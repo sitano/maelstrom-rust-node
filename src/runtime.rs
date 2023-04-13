@@ -432,6 +432,21 @@ impl Runtime {
     pub(crate) async fn release_rpc_sender(&self, id: u64) -> Option<Sender<Message>> {
         return self.inter.rpc.lock().await.remove(&id);
     }
+
+    pub fn is_client(&self, src: &String) -> bool {
+        return src.len() > 0 && src.starts_with("c");
+    }
+
+    pub fn is_from_cluster(&self, src: &String) -> bool {
+        // alternative implementation: self.nodes().contains(src)
+        return src.len() > 0 && src.starts_with("n");
+    }
+
+    /// All nodes that are not this node.
+    pub fn neighbours(&self) -> Vec<&String> {
+        let n = self.node_id();
+        self.nodes().iter().filter(|&t| t.as_str() != n).collect()
+    }
 }
 
 impl Clone for Runtime {

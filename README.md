@@ -129,6 +129,34 @@ impl Node for Handler {
 }
 ```
 
+## Requests
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct TopologyRequest {
+    topology: HashMap<String, Vec<String>>,
+}
+
+// or
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum Message {
+    Topology {
+        topology: HashMap<String, Vec<String>>,
+    },
+    Broadcast {
+        message: u64,
+    },
+    ReadOk {
+        messages: Vec<u64>,
+    },
+}
+
+```
+
 ## Responses
 
 ```rust
@@ -184,8 +212,22 @@ impl Node for Handler {
 
             let mut msg = serde_json::from_value::<BroadcastRequest>(raw)?;
             msg.typ = req.body.typ.clone();
-            
-            return runtime.reply_ok(req).await;
+
+            return runtime.reply(req, msg).await;
+        }
+
+        if req.get_type() == "broadcast" {
+            let mut msg = serde_json::from_value::<BroadcastRequest>(req.body.raw())?;
+            msg.typ = req.body.typ.clone();
+
+            return runtime.reply(req, msg).await;
+        }
+
+        if req.get_type() == "broadcast" {
+            let mut msg = req.body.as_obj::<BroadcastRequest>()?;
+            msg.typ = req.body.typ.clone();
+
+            return runtime.reply(req, msg).await;
         }
 
         if req.get_type() == "topology" {

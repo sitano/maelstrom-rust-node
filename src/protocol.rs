@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use crate::Result;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -99,6 +101,43 @@ impl MessageBody {
         let mut t = Self::default();
         t.extra = extra;
         return t;
+    }
+
+    /// ```
+    /// use maelstrom::protocol::Message;
+    /// use serde_json::Error;
+    ///
+    /// #[derive(serde::Deserialize)]
+    /// struct BroadcastRequest {}
+    ///
+    /// fn parse(m: Message) -> Result<BroadcastRequest, Error> {
+    ///     serde_json::from_value::<BroadcastRequest>(m.body.raw())
+    /// }
+    /// ```
+    pub fn raw(&self) -> Value {
+        Value::Object(self.extra.clone())
+    }
+
+    /// ```
+    /// use maelstrom::Result;
+    /// use maelstrom::protocol::Message;
+    /// use serde_json::Error;
+    ///
+    /// #[derive(serde::Deserialize)]
+    /// struct BroadcastRequest {}
+    ///
+    /// fn parse(m: Message) -> Result<BroadcastRequest> {
+    ///     m.body.as_obj::<BroadcastRequest>()
+    /// }
+    /// ```
+    pub fn as_obj<T>(&self) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
+        match T::deserialize(self.raw()) {
+            Ok(t) => Ok(t),
+            Err(e) => Err(Box::new(e)),
+        }
     }
 }
 

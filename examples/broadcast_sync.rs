@@ -1,9 +1,8 @@
 use async_trait::async_trait;
 use log::info;
-use maelstrom::protocol::Message;
+use maelstrom::protocol::{Message, MessageBody};
 use maelstrom::{done, Node, Result, Runtime};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
 pub(crate) fn main() -> Result<()> {
@@ -25,25 +24,20 @@ impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
         match req.get_type() {
             "read" => {
-                let data = self.inner.lock().unwrap().clone();
+                let data = self.snapshot();
                 let msg = ReadResponse { messages: data };
                 return runtime.reply(req, msg).await;
             }
             "broadcast" => {
-                let raw = Value::Object(req.body.extra.clone());
+                let msg = BroadcastRequest::from_message(&req.body)?;
 
-                let mut msg = serde_json::from_value::<BroadcastRequest>(raw)?;
-                msg.typ = req.body.typ.clone();
+                self.add(msg.value);
 
-                self.inner.lock().unwrap().push(msg.message);
-
-                if !runtime.nodes().contains(&req.src) {
-                    for node in runtime.nodes().to_vec() {
-                        if node != runtime.node_id() {
-                            let _ = Runtime::rpc(runtime.clone(), node.clone(), msg.clone())
-                                .await? // Result<RPCResult>
-                                .await?; // Result<Message>
-                        }
+                if !runtime.is_from_cluster(&req.src) {
+                    for node in runtime.neighbours() {
+                        let _ = Runtime::rpc(runtime.clone(), node.clone(), msg.clone())
+                            .await? // Result<RPCResult>
+                            .await?; // Result<Message>
                     }
                 }
 
@@ -58,19 +52,33 @@ impl Node for Handler {
     }
 }
 
+impl Handler {
+    fn snapshot(&self) -> Vec<u64> {
+        self.inner.lock().unwrap().clone()
+    }
+
+    fn add(&self, val: u64) {
+        self.inner.lock().unwrap().push(val);
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct BroadcastRequest {
     #[serde(default, rename = "type")]
     typ: String,
-    message: u64,
+    #[serde(default, rename = "message")]
+    value: u64,
 }
-
-// #[derive(Deserialize)]
-// struct TopologyRequest {
-//     topology: HashMap<String, Vec<String>>,
-// }
 
 #[derive(Serialize)]
 struct ReadResponse {
     messages: Vec<u64>,
+}
+
+impl BroadcastRequest {
+    fn from_message(m: &MessageBody) -> Result<Self> {
+        let mut msg = m.as_obj::<BroadcastRequest>()?;
+        msg.typ = m.typ.clone();
+        Ok(msg)
+    }
 }

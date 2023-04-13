@@ -1,5 +1,7 @@
 #![feature(async_closure)]
 
+extern crate core;
+
 pub(crate) mod error;
 pub mod log;
 pub mod protocol;
