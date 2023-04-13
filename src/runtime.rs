@@ -473,9 +473,7 @@ impl Node for EchoNode {
 #[cfg(test)]
 mod test {
     use crate::{MembershipState, Result, Runtime};
-    use std::time::Duration;
     use tokio::io::BufReader;
-    use tokio_context::context::Context;
     use tokio_util::sync::CancellationToken;
 
     #[test]
