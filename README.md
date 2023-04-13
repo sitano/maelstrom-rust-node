@@ -1,4 +1,4 @@
-# maelstrom-rust-demo
+# maelstrom-rust-node
 
 Yet another one Rust crate for implementing nodes for https://github.com/jepsen-io/maelstrom and solve
 https://fly.io/dist-sys/ challenges.
