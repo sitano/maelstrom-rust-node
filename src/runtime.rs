@@ -368,7 +368,11 @@ impl Runtime {
         if msg.body.in_reply_to > 0 {
             let mut guard = runtime.inter.rpc.lock().await;
             if let Some(tx) = guard.remove(&msg.body.in_reply_to) {
-                let _ = tx.send(msg);
+                // we don't need to hold mutex for doing long blocking tx.send.
+                drop(guard);
+                // at the moment we don't care of the send err because I expect
+                // it will fail only if the rx end is closed.
+                drop(tx.send(msg));
             }
             return Ok(());
         }
