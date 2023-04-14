@@ -3,6 +3,7 @@
 extern crate core;
 
 pub(crate) mod error;
+pub mod kv;
 pub mod log;
 pub mod protocol;
 pub(crate) mod rpc;

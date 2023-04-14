@@ -15,12 +15,13 @@ violated. With maelstrom you build nodes that form distributed system that can p
 - simple API - single trait fn to implement
 - response types auto-deduction, extra data available via Value()
 - unknown message types handling
-- rpc + timeout
-- TODO: kv
+- a/sync RPC() support + timeout / context
+- lin/seq/lww kv storage
+- transparent error handling
 
 # Examples
 
-## Echo server
+## Echo workload
 
 ```bash
 $ cargo build --examples
@@ -87,14 +88,232 @@ send back the same msg with body.type == echo_ok.
       }
     }
 
-## Broadcast
+## Broadcast workload
 
 ```bash
 $ cargo build --examples
 $ RUST_LOG=debug maelstrom test -w broadcast --bin ./target/debug/examples/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
 ````
 
+implementation:
+
+```bash
+use async_trait::async_trait;
+use log::info;
+use maelstrom::protocol::{Message, MessageBody};
+use maelstrom::{done, Node, Result, Runtime};
+use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+
+pub(crate) fn main() -> Result<()> {
+    Runtime::init(try_main())
+}
+
+async fn try_main() -> Result<()> {
+    let handler = Arc::new(Handler::default());
+    Runtime::new().with_handler(handler).run().await
+}
+
+#[derive(Clone, Default)]
+struct Handler {
+    inner: Arc<Mutex<Vec<u64>>>,
+}
+
+#[async_trait]
+impl Node for Handler {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        match req.get_type() {
+            "read" => {
+                let data = self.snapshot();
+                let msg = ReadResponse { messages: data };
+                return runtime.reply(req, msg).await;
+            }
+            "broadcast" => {
+                let msg = BroadcastRequest::from_message(&req.body)?;
+
+                self.add(msg.value);
+
+                if !runtime.is_from_cluster(&req.src) {
+                    for node in runtime.neighbours() {
+                        runtime.spawn(Runtime::rpc(runtime.clone(), node.clone(), msg.clone()));
+                    }
+                }
+
+                return runtime.reply_ok(req).await;
+            }
+            "topology" => {
+                info!("new topology {:?}", req.body.extra.get("topology").unwrap());
+                return runtime.reply_ok(req).await;
+            }
+            _ => done(runtime, req),
+        }
+    }
+}
+
+impl Handler {
+    fn snapshot(&self) -> Vec<u64> {
+        self.inner.lock().unwrap().clone()
+    }
+
+    fn add(&self, val: u64) {
+        self.inner.lock().unwrap().push(val);
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct BroadcastRequest {
+    #[serde(default, rename = "type")]
+    typ: String,
+    #[serde(default, rename = "message")]
+    value: u64,
+}
+
+#[derive(Serialize)]
+struct ReadResponse {
+    messages: Vec<u64>,
+}
+
+impl BroadcastRequest {
+    fn from_message(m: &MessageBody) -> Result<Self> {
+        let mut msg = m.as_obj::<BroadcastRequest>()?;
+        msg.typ = m.typ.clone();
+        Ok(msg)
+    }
+}
+```
+
+## Lin-kv workload
+
+```bash
+$ cargo build --examples
+$ RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w lin-kv --bin ./target/debug/examples/lin_kv --node-count 4 --concurrency 2n --time-limit 10 --rate 100 --log-stderr
+````
+
+implementation:
+
+```rust
+use async_trait::async_trait;
+use maelstrom::kv::{lin_kv, Storage, KV};
+use maelstrom::protocol::Message;
+use maelstrom::{done, Node, Result, Runtime};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio_context::context::Context;
+
+pub(crate) fn main() -> Result<()> {
+    Runtime::init(try_main())
+}
+
+async fn try_main() -> Result<()> {
+    let runtime = Runtime::new();
+    let handler = Arc::new(handler(runtime.clone()));
+    runtime.with_handler(handler).run().await
+}
+
+#[derive(Clone)]
+struct Handler {
+    s: Storage,
+}
+
+#[async_trait]
+impl Node for Handler {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        let msg: Result<Request> = req.body.as_obj();
+        match msg {
+            Ok(Request::Read { key }) => {
+                let (ctx, _handler) = Context::new();
+                let value = self.s.get(ctx, key.to_string()).await?;
+                return runtime.reply(req, Request::ReadOk { value }).await;
+            }
+            Ok(Request::Write { key, value }) => {
+                let (ctx, _handler) = Context::new();
+                self.s.put(ctx, key.to_string(), value).await?;
+                return runtime.reply(req, Request::WriteOk {}).await;
+            }
+            Ok(Request::Cas { key, from, to, put }) => {
+                let (ctx, _handler) = Context::new();
+                self.s.cas(ctx, key.to_string(), from, to, put).await?;
+                return runtime.reply(req, Request::CasOk {}).await;
+            }
+            _ => done(runtime, req),
+        }
+    }
+}
+
+fn handler(runtime: Runtime) -> Handler {
+    Handler { s: lin_kv(runtime) }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+enum Request {
+    Read {
+        key: u64,
+    },
+    ReadOk {
+        value: i64,
+    },
+    Write {
+        key: u64,
+        value: i64,
+    },
+    WriteOk {},
+    Cas {
+        key: u64,
+        from: i64,
+        to: i64,
+        #[serde(default, rename = "create_if_not_exists")]
+        put: bool,
+    },
+    CasOk {},
+}
+```
+
 # API
+
+## Key-Value storage
+
+```rust
+use async_trait::async_trait;
+use maelstrom::kv::{lin_kv, Storage, KV};
+use maelstrom::protocol::Message;
+use maelstrom::{done, Node, Result, Runtime};
+use tokio_context::context::Context;
+
+#[derive(Clone)]
+struct Handler {
+    s: Storage,
+}
+
+#[async_trait]
+impl Node for Handler {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        let msg: Result<Request> = req.body.as_obj();
+        match msg {
+            Ok(Request::Read { key }) => {
+                let (ctx, _handler) = Context::new();
+                let value = self.s.get(ctx, key.to_string()).await?;
+                return runtime.reply(req, Request::ReadOk { value }).await;
+            }
+            Ok(Request::Write { key, value }) => {
+                let (ctx, _handler) = Context::new();
+                self.s.put(ctx, key.to_string(), value).await?;
+                return runtime.reply(req, Request::WriteOk {}).await;
+            }
+            Ok(Request::Cas { key, from, to, put }) => {
+                let (ctx, _handler) = Context::new();
+                self.s.cas(ctx, key.to_string(), from, to, put).await?;
+                return runtime.reply(req, Request::CasOk {}).await;
+            }
+            _ => done(runtime, req),
+        }
+    }
+}
+
+fn handler(runtime: Runtime) -> Handler {
+    Handler { s: lin_kv(runtime) }
+}
+```
 
 ## RPC
 
