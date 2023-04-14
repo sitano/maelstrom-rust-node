@@ -1,4 +1,4 @@
-use crate::protocol::Message;
+use crate::protocol::{ErrorMessageBody, Message};
 use crate::Error;
 use crate::Result;
 use crate::Runtime;
@@ -153,5 +153,21 @@ fn rpc_msg_type(m: Message) -> Result<Message> {
         Err(Box::new(Error::from(&m.body)))
     } else {
         Ok(m)
+    }
+}
+
+pub fn is_rpc_error<T>(t: &Result<T>) -> bool {
+    match t {
+        Ok(_) => false,
+        Err(e) => e.downcast_ref::<Error>().is_some(),
+    }
+}
+
+pub fn rpc_err_to_response<T>(t: &Result<T>) -> Option<ErrorMessageBody> {
+    match t {
+        Ok(_) => None,
+        Err(e) => e
+            .downcast_ref::<Error>()
+            .map(|t| ErrorMessageBody::from_error(t.clone())),
     }
 }

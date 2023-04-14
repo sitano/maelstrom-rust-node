@@ -3,7 +3,7 @@
 use crate::error::Error;
 use crate::protocol::{ErrorMessageBody, InitMessageBody, Message, MessageBody};
 use crate::waitgroup::WaitGroup;
-use crate::RPCResult;
+use crate::{rpc_err_to_response, RPCResult};
 use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -391,9 +391,15 @@ impl Runtime {
         }
 
         if let Some(handler) = runtime.inter.handler.get() {
-            let res = handler.process(runtime.clone(), msg).await;
+            // I am not happy we are cloning a msg here, but let it go this time.
+            let res = handler.process(runtime.clone(), msg.clone()).await;
             if res.is_err() {
-                return res;
+                // rpc error is user level error
+                if let Some(user_err) = rpc_err_to_response(&res) {
+                    runtime.reply(msg, user_err).await?;
+                } else {
+                    return res;
+                }
             }
         }
 
