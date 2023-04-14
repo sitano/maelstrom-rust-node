@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use crate::Result;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -139,9 +138,9 @@ impl MessageBody {
     ///     m.body.as_obj::<BroadcastRequest>()
     /// }
     /// ```
-    pub fn as_obj<T>(&self) -> Result<T>
+    pub fn as_obj<'de, T>(&self) -> Result<T>
     where
-        T: DeserializeOwned,
+        T: Deserialize<'de>,
     {
         match T::deserialize(self.raw()) {
             Ok(t) => Ok(t),
