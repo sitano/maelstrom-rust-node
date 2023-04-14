@@ -6,5 +6,5 @@ pub fn builder() -> Builder {
     let mut b = Builder::from_env(env);
     b.format_level(true);
     b.format_timestamp_micros();
-    return b;
+    b
 }

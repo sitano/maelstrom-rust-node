@@ -68,7 +68,7 @@ pub struct ErrorMessageBody {
 }
 
 impl Message {
-    pub fn get_type(self: &Self) -> &str {
+    pub fn get_type(&self) -> &str {
         return self.body.typ.as_str();
     }
 }
@@ -81,25 +81,26 @@ impl MessageBody {
     pub fn with_type(self, typ: &str) -> Self {
         let mut t = self;
         t.typ = typ.to_string();
-        return t;
+        t
     }
 
     pub fn with_reply_to(self, in_reply_to: u64) -> Self {
         let mut t = self;
         t.in_reply_to = in_reply_to;
-        return t;
+        t
     }
 
     pub fn and_msg_id(self, msg_id: u64) -> Self {
         let mut t = self;
         t.msg_id = msg_id;
-        return t;
+        t
     }
 
     pub fn from_extra(extra: Map<String, Value>) -> Self {
-        let mut t = Self::default();
-        t.extra = extra;
-        return t;
+        MessageBody {
+            extra,
+            ..Default::default()
+        }
     }
 
     pub fn is_error(&self) -> bool {
@@ -151,15 +152,15 @@ impl MessageBody {
 
 impl ErrorMessageBody {
     pub fn new(code: i32, text: &str) -> Self {
-        return ErrorMessageBody {
+        ErrorMessageBody {
             typ: "error".to_string(),
             code,
             text: text.to_string(),
-        };
+        }
     }
 
     pub fn from_error(err: crate::Error) -> Self {
-        return err.into();
+        err.into()
     }
 }
 

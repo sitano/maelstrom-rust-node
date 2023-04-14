@@ -74,7 +74,7 @@ pub trait Node: Sync + Send {
     ///     }
     /// }
     /// ```
-    async fn process(self: &Self, runtime: Runtime, request: Message) -> Result<()>;
+    async fn process(&self, runtime: Runtime, request: Message) -> Result<()>;
 }
 
 /// Returns a result with NotSupported error meaning that Node.process()
@@ -110,7 +110,7 @@ pub fn done(runtime: Runtime, message: Message) -> Result<()> {
         let _ = runtime0.reply(message, msg).await;
     });
 
-    return Err(Box::new(err));
+    Err(Box::new(err))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -133,26 +133,17 @@ impl Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
-        return Runtime {
-            inter: Arc::new(Inter {
-                msg_id: AtomicU64::new(1),
-                membership: OnceCell::new(),
-                handler: OnceCell::new(),
-                rpc: Mutex::default(),
-                out: Mutex::new(stdout()),
-                serving: WaitGroup::new(),
-            }),
-        };
+        Runtime::default()
     }
 
     pub fn with_handler(self, handler: Arc<dyn Node + Send + Sync>) -> Self {
-        if let Err(_) = self.inter.handler.set(handler) {
+        if self.inter.handler.set(handler).is_err() {
             panic!("runtime handler is already initialized");
         }
-        return self;
+        self
     }
 
-    pub async fn send_raw(self: &Self, msg: &str) -> Result<()> {
+    pub async fn send_raw(&self, msg: &str) -> Result<()> {
         {
             let mut out = self.inter.out.lock().await;
             out.write_all(msg.as_bytes()).await?;
@@ -162,7 +153,7 @@ impl Runtime {
         Ok(())
     }
 
-    pub async fn send<T>(self: &Self, req: Message, resp: T) -> Result<()>
+    pub async fn send<T>(&self, req: Message, resp: T) -> Result<()>
     where
         T: Serialize,
     {
@@ -181,10 +172,10 @@ impl Runtime {
         };
 
         let answer = serde_json::to_string(&msg)?;
-        return self.send_raw(answer.as_str()).await;
+        self.send_raw(answer.as_str()).await
     }
 
-    pub async fn reply<T>(self: &Self, req: Message, resp: T) -> Result<()>
+    pub async fn reply<T>(&self, req: Message, resp: T) -> Result<()>
     where
         T: Serialize,
     {
@@ -207,11 +198,11 @@ impl Runtime {
         };
 
         let answer = serde_json::to_string(&msg)?;
-        return self.send_raw(answer.as_str()).await;
+        self.send_raw(answer.as_str()).await
     }
 
-    pub async fn reply_ok(self: &Self, req: Message) -> Result<()> {
-        return self.reply(req, Runtime::empty_response()).await;
+    pub async fn reply_ok(&self, req: Message) -> Result<()> {
+        self.reply(req, Runtime::empty_response()).await
     }
 
     // TODO: need a way to point out type for rpc(). maybe rpc_with_type().
@@ -245,11 +236,11 @@ impl Runtime {
             return Err(err);
         }
 
-        return Ok(RPCResult::new(req_msg_id, rx, runtime.clone()));
+        Ok(RPCResult::new(req_msg_id, rx, runtime.clone()))
     }
 
     #[track_caller]
-    pub fn spawn<T>(self: &Self, future: T) -> JoinHandle<T::Output>
+    pub fn spawn<T>(&self, future: T) -> JoinHandle<T::Output>
     where
         T: Future + Send + 'static,
         T::Output: Send + 'static,
@@ -261,21 +252,21 @@ impl Runtime {
         }))
     }
 
-    pub fn node_id(self: &Self) -> &str {
+    pub fn node_id(&self) -> &str {
         if let Some(v) = self.inter.membership.get() {
             return v.node_id.as_str();
         }
-        return &"";
+        ""
     }
 
-    pub fn nodes(self: &Self) -> &[String] {
+    pub fn nodes(&self) -> &[String] {
         if let Some(v) = self.inter.membership.get() {
             return v.nodes.as_slice();
         }
-        return &[];
+        &[]
     }
 
-    pub fn set_membership_state(self: &Self, state: MembershipState) -> Result<()> {
+    pub fn set_membership_state(&self, state: MembershipState) -> Result<()> {
         if let Err(e) = self.inter.membership.set(state) {
             bail!("membership is inited: {}", e);
         }
@@ -288,15 +279,15 @@ impl Runtime {
         Ok(())
     }
 
-    pub async fn done(self: &Self) {
+    pub async fn done(&self) {
         self.inter.serving.wait().await;
     }
 
-    pub async fn run(self: &Self) -> Result<()> {
-        return self.run_with(BufReader::new(stdin())).await;
+    pub async fn run(&self) -> Result<()> {
+        self.run_with(BufReader::new(stdin())).await
     }
 
-    pub async fn run_with<R>(self: &Self, input: BufReader<R>) -> Result<()>
+    pub async fn run_with<R>(&self, input: BufReader<R>) -> Result<()>
     where
         R: AsyncRead + Unpin,
     {
@@ -384,10 +375,7 @@ impl Runtime {
         let mut init_source: Option<Message> = None;
         if is_init {
             init_source = Some(msg.clone());
-            let res = runtime.process_init(&msg);
-            if res.is_err() {
-                return res;
-            }
+            runtime.process_init(&msg)?;
         }
 
         if let Some(handler) = runtime.inter.handler.get() {
@@ -418,7 +406,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn process_init(self: &Self, message: &Message) -> Result<()> {
+    fn process_init(&self, message: &Message) -> Result<()> {
         let raw = message.body.extra.clone();
         let init = serde_json::from_value::<InitMessageBody>(Value::Object(raw))?;
         self.set_membership_state(MembershipState {
@@ -428,31 +416,34 @@ impl Runtime {
     }
 
     #[inline]
-    pub fn next_msg_id(self: &Self) -> u64 {
-        return self.inter.msg_id.fetch_add(1, AcqRel);
+    pub fn next_msg_id(&self) -> u64 {
+        self.inter.msg_id.fetch_add(1, AcqRel)
     }
 
     #[inline]
     pub fn empty_response() -> Value {
-        return Value::Object(serde_json::Map::default());
+        Value::Object(serde_json::Map::default())
     }
 
     #[inline]
     pub(crate) async fn release_rpc_sender(&self, id: u64) -> Option<Sender<Message>> {
-        return self.inter.rpc.lock().await.remove(&id);
+        self.inter.rpc.lock().await.remove(&id)
     }
 
+    #[inline]
     pub fn is_client(&self, src: &String) -> bool {
-        return src.len() > 0 && src.starts_with("c");
+        !src.is_empty() && src.starts_with('c')
     }
 
+    #[inline]
     pub fn is_from_cluster(&self, src: &String) -> bool {
         // alternative implementation: self.nodes().contains(src)
-        return src.len() > 0 && src.starts_with("n");
+        !src.is_empty() && src.starts_with('n')
     }
 
     /// All nodes that are not this node.
-    pub fn neighbours<'a>(&'a self) -> impl Iterator<Item = &'a String> + 'a {
+    #[inline]
+    pub fn neighbours(&self) -> impl Iterator<Item = &String> {
         let n = self.node_id();
         self.nodes()
             .iter()
@@ -460,11 +451,26 @@ impl Runtime {
     }
 }
 
+impl Default for Runtime {
+    fn default() -> Self {
+        Runtime {
+            inter: Arc::new(Inter {
+                msg_id: AtomicU64::new(1),
+                membership: OnceCell::new(),
+                handler: OnceCell::new(),
+                rpc: Mutex::default(),
+                out: Mutex::new(stdout()),
+                serving: WaitGroup::new(),
+            }),
+        }
+    }
+}
+
 impl Clone for Runtime {
     fn clone(&self) -> Self {
-        return Runtime {
+        Runtime {
             inter: self.inter.clone(),
-        };
+        }
     }
 }
 
@@ -473,7 +479,7 @@ pub struct BlackHoleNode {}
 
 #[async_trait]
 impl Node for BlackHoleNode {
-    async fn process(self: &Self, _: Runtime, _: Message) -> Result<()> {
+    async fn process(&self, _: Runtime, _: Message) -> Result<()> {
         Ok(())
     }
 }
@@ -484,7 +490,7 @@ pub struct IOFailingNode {}
 
 #[async_trait]
 impl Node for IOFailingNode {
-    async fn process(self: &Self, _: Runtime, _: Message) -> Result<()> {
+    async fn process(&self, _: Runtime, _: Message) -> Result<()> {
         bail!("IOFailingNode: process failed")
     }
 }
@@ -494,7 +500,7 @@ pub struct EchoNode {}
 
 #[async_trait]
 impl Node for EchoNode {
-    async fn process(self: &Self, runtime: Runtime, req: Message) -> Result<()> {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
         let resp = Value::Object(serde_json::Map::default());
         runtime.reply(req, resp).await
     }
