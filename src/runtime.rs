@@ -214,6 +214,9 @@ impl Runtime {
         return self.reply(req, Runtime::empty_response()).await;
     }
 
+    // TODO: need a way to point out type for rpc(). maybe rpc_with_type().
+    // TODO: maybe put rpc() away out of Runtime::.
+
     pub async fn rpc<T>(runtime: Runtime, to: String, resp: T) -> Result<RPCResult>
     where
         T: Serialize,

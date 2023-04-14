@@ -1,4 +1,4 @@
-use crate::protocol::ErrorMessageBody;
+use crate::protocol::{ErrorMessageBody, MessageBody};
 use std::fmt::{Display, Formatter};
 
 /// [source](https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#errors).
@@ -84,6 +84,37 @@ impl Error {
     }
 }
 
+impl From<&MessageBody> for Error {
+    fn from(value: &MessageBody) -> Self {
+        if !value.is_error() {
+            return Error::Custom(-1, "serialized response that was not an error".to_string());
+        }
+
+        match value.as_obj::<ErrorMessageBody>() {
+            Err(t) => Error::Custom(Error::Crash.code(), t.to_string()),
+            Ok(obj) => Error::from(obj),
+        }
+    }
+}
+
+impl From<ErrorMessageBody> for Error {
+    fn from(value: ErrorMessageBody) -> Self {
+        match value.code {
+            0 => Error::Timeout,
+            10 => Error::NotSupported(value.text),
+            11 => Error::TemporarilyUnavailable,
+            12 => Error::MalformedRequest,
+            13 => Error::Crash,
+            14 => Error::Abort,
+            20 => Error::KeyDoesNotExist,
+            21 => Error::KeyAlreadyExists,
+            22 => Error::PreconditionFailed,
+            30 => Error::TxnConflict,
+            code => Error::Custom(code, value.text),
+        }
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "error({}): {}", self.code(), self.description())
@@ -103,5 +134,37 @@ impl Into<ErrorMessageBody> for Error {
                 o => o.description().to_string(),
             },
         };
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::protocol::MessageBody;
+    use crate::runtime::Result;
+    use crate::Error;
+
+    #[test]
+    fn parse_non_error() -> Result<()> {
+        let raw = r#"{"type":"none","msg_id":1}"#;
+        let msg: MessageBody = serde_json::from_str(&raw)?;
+        assert_eq!(msg.is_error(), false);
+
+        let err = Error::from(&msg);
+        assert_eq!(err.code(), -1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_not_supported_error() -> Result<()> {
+        let raw = r#"{"type":"error","msg_id":1, "code": 10}"#;
+        let msg: MessageBody = serde_json::from_str(&raw)?;
+        assert_eq!(msg.is_error(), true);
+
+        let err = Error::from(&msg);
+        let expected = Error::NotSupported("".to_string());
+        assert_eq!(err, expected);
+
+        Ok(())
     }
 }

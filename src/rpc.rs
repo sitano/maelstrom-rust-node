@@ -91,7 +91,7 @@ impl RPCResult {
 
         select! {
             data = rx => match data {
-                Ok(resp) => result = Ok(resp),
+                Ok(resp) => result = rpc_msg_type(resp),
                 Err(err) => result = Err(Box::new(err)),
             },
             _ = ctx.done() => result = Err(Box::new(Error::Timeout)),
@@ -140,10 +140,18 @@ impl Future for RPCResult {
                 let _ = self.rx.take();
                 match t {
                     Err(e) => Poll::Ready(Err(Box::new(e))),
-                    Ok(m) => Poll::Ready(Ok(m)),
+                    Ok(m) => Poll::Ready(rpc_msg_type(m)),
                 }
             }
             _ => Poll::Pending,
         }
+    }
+}
+
+fn rpc_msg_type(m: Message) -> Result<Message> {
+    if m.body.is_error() {
+        Err(Box::new(Error::from(&m.body)))
+    } else {
+        Ok(m)
     }
 }

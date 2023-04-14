@@ -103,6 +103,10 @@ impl MessageBody {
         return t;
     }
 
+    pub fn is_error(&self) -> bool {
+        self.typ == "error"
+    }
+
     /// ```
     /// use maelstrom::protocol::Message;
     /// use serde_json::Error;
@@ -115,7 +119,12 @@ impl MessageBody {
     /// }
     /// ```
     pub fn raw(&self) -> Value {
-        Value::Object(self.extra.clone())
+        // we could name it to reflect cloning, but ok.
+        // we also could re-serialize whole self to Value first, but probably not needed.
+        // users usually need at least type to serialize it into the errors.
+        let mut raw = self.extra.clone();
+        drop(raw.insert("type".to_string(), Value::String(self.typ.clone())));
+        Value::Object(raw)
     }
 
     /// ```
