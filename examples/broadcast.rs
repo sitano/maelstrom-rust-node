@@ -1,3 +1,7 @@
+/// ```bash
+/// $ cargo build --examples
+/// $ RUST_LOG=debug maelstrom test -w broadcast --bin ./target/debug/examples/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
+/// ````
 use async_trait::async_trait;
 use log::info;
 use maelstrom::protocol::{Message, MessageBody};

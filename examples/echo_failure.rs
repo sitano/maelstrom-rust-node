@@ -1,3 +1,7 @@
+/// ```bash
+/// $ cargo build --examples
+/// $ maelstrom test -w echo --bin ./target/debug/examples/echo_failure --node-count 1 --time-limit 10 --log-stderr
+/// ````
 use async_trait::async_trait;
 use maelstrom::protocol::{ErrorMessageBody, Message};
 use maelstrom::{done, Node, Result, Runtime};

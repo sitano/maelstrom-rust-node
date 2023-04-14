@@ -94,7 +94,6 @@ $ cargo build --examples
 $ RUST_LOG=debug maelstrom test -w broadcast --bin ./target/debug/examples/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
 ````
 
-
 # API
 
 ## RPC
