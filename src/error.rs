@@ -123,20 +123,6 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-impl Into<ErrorMessageBody> for Error {
-    fn into(self) -> ErrorMessageBody {
-        return ErrorMessageBody {
-            typ: "error".to_string(),
-            code: self.code(),
-            text: match self {
-                Error::NotSupported(t) => format!("{} message type is not supported", t),
-                Error::Custom(id, t) => format!("error({}): {}", id, t),
-                o => o.description().to_string(),
-            },
-        };
-    }
-}
-
 #[cfg(test)]
 mod test {
     use crate::protocol::MessageBody;

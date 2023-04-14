@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::Result;
+use crate::{Error, Result};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -159,8 +159,22 @@ impl ErrorMessageBody {
         }
     }
 
-    pub fn from_error(err: crate::Error) -> Self {
-        err.into()
+    pub fn from_error(err: Error) -> Self {
+        Self::from(err)
+    }
+}
+
+impl From<Error> for ErrorMessageBody {
+    fn from(value: Error) -> Self {
+        return ErrorMessageBody {
+            typ: "error".to_string(),
+            code: value.code(),
+            text: match value {
+                Error::NotSupported(t) => format!("{} message type is not supported", t),
+                Error::Custom(id, t) => format!("error({}): {}", id, t),
+                o => o.description().to_string(),
+            },
+        };
     }
 }
 
