@@ -443,9 +443,11 @@ impl Runtime {
     }
 
     /// All nodes that are not this node.
-    pub fn neighbours(&self) -> Vec<&String> {
+    pub fn neighbours<'a>(&'a self) -> impl Iterator<Item = &'a String> + 'a {
         let n = self.node_id();
-        self.nodes().iter().filter(|&t| t.as_str() != n).collect()
+        self.nodes()
+            .iter()
+            .filter(move |t: &&String| t.as_str() != n)
     }
 }
 
