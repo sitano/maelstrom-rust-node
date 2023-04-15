@@ -261,25 +261,29 @@ impl Runtime {
     ///     },
     /// }
     /// ```
-    pub async fn rpc<T>(&self, to: String, request: T) -> Result<RPCResult>
+    pub fn rpc<T>(&self, to: String, request: T) -> impl Future<Output = Result<RPCResult>>
         where
             T: Serialize,
     {
-        let mut msg = crate::protocol::message(self.node_id().to_string(), to, request)?;
-        let req_msg_id = self.next_msg_id();
+        let runtime = self.clone();
 
-        msg.body.msg_id = req_msg_id;
+        async move {
+            let mut msg = crate::protocol::message(runtime.node_id().to_string(), to, request)?;
+            let req_msg_id = runtime.next_msg_id();
 
-        let (tx, rx) = oneshot::channel::<Message>();
-        let _ = self.insert_rpc_sender(req_msg_id, tx).await;
+            msg.body.msg_id = req_msg_id;
 
-        let req_str = serde_json::to_string(&msg)?;
-        if let Err(err) = self.send_raw(req_str.as_str()).await {
-            let _ = self.release_rpc_sender(req_msg_id).await;
-            return Err(err);
+            let (tx, rx) = oneshot::channel::<Message>();
+            let _ = runtime.insert_rpc_sender(req_msg_id, tx).await;
+
+            let req_str = serde_json::to_string(&msg)?;
+            if let Err(err) = runtime.send_raw(req_str.as_str()).await {
+                let _ = runtime.release_rpc_sender(req_msg_id).await;
+                return Err(err);
+            }
+
+            Ok(RPCResult::new(req_msg_id, rx, runtime))
         }
-
-        Ok(RPCResult::new(req_msg_id, rx, self.clone()))
     }
 
     pub fn node_id(&self) -> &str {
