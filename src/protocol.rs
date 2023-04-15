@@ -4,6 +4,7 @@ use crate::{Error, Result};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Map, Value};
+use simple_error::bail;
 
 /// Message represents a message sent from Src node to Dest node.
 /// The body is stored as parsed MessageBody along with the original string
@@ -176,6 +177,27 @@ impl From<Error> for ErrorMessageBody {
             },
         };
     }
+}
+
+pub fn message<T>(from: String, to: String, message: T) -> Result<Message>
+where
+    T: Serialize,
+{
+    let body = match serde_json::to_value(message) {
+        Ok(v) => match v {
+            Value::Object(m) => m,
+            _ => bail!("response object has invalid serde_json::Value kind"),
+        },
+        Err(e) => bail!("response object is invalid, can't convert: {}", e),
+    };
+
+    let msg = Message {
+        src: from,
+        dest: to,
+        body: MessageBody::from_extra(body),
+    };
+
+    Ok(msg)
 }
 
 #[cfg(test)]

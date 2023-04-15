@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use crate::error::Error;
-use crate::protocol::{ErrorMessageBody, InitMessageBody, Message, MessageBody};
+use crate::protocol::{ErrorMessageBody, InitMessageBody, Message};
 use crate::waitgroup::WaitGroup;
 use crate::{rpc_err_to_response, RPCResult};
 use async_trait::async_trait;
@@ -158,7 +158,7 @@ impl Runtime {
         T: Serialize + Send,
     {
         let runtime = self.clone();
-        let msg = self.to_message(to, message)?;
+        let msg = crate::protocol::message(self.node_id().to_string(), to, message)?;
         let ans = serde_json::to_string(&msg)?;
         self.spawn(async move {
             if let Err(err) = runtime.send_raw(ans.as_str()).await {
@@ -168,32 +168,11 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn to_message<T>(&self, to: String, message: T) -> Result<Message>
-    where
-        T: Serialize,
-    {
-        let body = match serde_json::to_value(message) {
-            Ok(v) => match v {
-                Value::Object(m) => m,
-                _ => bail!("response object has invalid serde_json::Value kind"),
-            },
-            Err(e) => bail!("response object is invalid, can't convert: {}", e),
-        };
-
-        let msg = Message {
-            src: self.node_id().to_string(),
-            dest: to,
-            body: MessageBody::from_extra(body),
-        };
-
-        Ok(msg)
-    }
-
     pub async fn send<T>(&self, to: String, message: T) -> Result<()>
     where
         T: Serialize,
     {
-        let msg = self.to_message(to, message)?;
+        let msg = crate::protocol::message(self.node_id().to_string(), to, message)?;
         let ans = serde_json::to_string(&msg)?;
         self.send_raw(ans.as_str()).await
     }
@@ -209,7 +188,7 @@ impl Runtime {
     where
         T: Serialize,
     {
-        let mut msg = self.to_message(req.src, resp)?;
+        let mut msg = crate::protocol::message(self.node_id().to_string(), req.src, resp)?;
         msg.body.in_reply_to = req.body.msg_id;
 
         if !msg.body.extra.contains_key("type") && !req.body.typ.is_empty() {
@@ -229,29 +208,19 @@ impl Runtime {
     // TODO: need a way to point out type for rpc(). maybe rpc_with_type().
     // TODO: maybe put rpc() away out of Runtime::.
 
-    pub async fn rpc<T>(runtime: Runtime, to: String, resp: T) -> Result<RPCResult>
+    pub async fn rpc<T>(runtime: Runtime, to: String, request: T) -> Result<RPCResult>
     where
         T: Serialize,
     {
-        let extra = match serde_json::to_value(resp) {
-            Ok(v) => match v {
-                Value::Object(m) => m,
-                _ => bail!("response object has invalid serde_json::Value kind"),
-            },
-            Err(e) => bail!("response object is invalid, can't convert: {}", e),
-        };
-
+        let mut msg = crate::protocol::message(runtime.node_id().to_string(), to, request)?;
         let req_msg_id = runtime.next_msg_id();
-        let req = Message {
-            src: runtime.node_id().to_string(),
-            dest: to,
-            body: MessageBody::from_extra(extra).and_msg_id(req_msg_id),
-        };
+
+        msg.body.msg_id = req_msg_id;
 
         let (tx, rx) = oneshot::channel::<Message>();
         let _ = runtime.inter.rpc.lock().await.insert(req_msg_id, tx);
 
-        let req_str = serde_json::to_string(&req)?;
+        let req_str = serde_json::to_string(&msg)?;
         if let Err(err) = runtime.send_raw(req_str.as_str()).await {
             let _ = runtime.release_rpc_sender(req_msg_id).await;
             return Err(err);
