@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use log::info;
 use maelstrom::protocol::{Message, MessageBody};
-use maelstrom::{done, Node, Result, Runtime};
+use maelstrom::{done, rpc, Node, Result, Runtime};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -39,7 +39,7 @@ impl Node for Handler {
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
-                        let _ = Runtime::rpc(runtime.clone(), node.clone(), msg.clone())
+                        let _ = rpc(runtime.clone(), node.clone(), msg.clone())
                             .await? // Result<RPCResult>
                             .await?; // Result<Message>
                     }

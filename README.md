@@ -114,7 +114,7 @@ impl Node for Handler {
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
-                        runtime.spawn(Runtime::rpc(runtime.clone(), node.clone(), msg.clone()));
+                        runtime.spawn(rpc(runtime.clone(), node.clone(), msg.clone()));
                     }
                 }
 
@@ -278,7 +278,7 @@ fn handler(runtime: Runtime) -> Handler {
 ```rust
 use async_trait::async_trait;
 use maelstrom::protocol::Message;
-use maelstrom::{Node, Result, Runtime};
+use maelstrom::{Node, Result, Runtime, rpc};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
@@ -289,14 +289,14 @@ struct Handler {}
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
         // 1.
-        runtime.spawn(Runtime::rpc(runtime.clone(), node.clone(), msg.clone()));
+        runtime.spawn(rpc(runtime.clone(), node.clone(), msg.clone()));
         
         // 2. put it into runtime.spawn(async move { ... }) if needed
-        let res: RPCResult = Runtime::rpc(runtime.clone(), node.clone(), msg.clone()).await?;
+        let res: RPCResult = rpc(runtime.clone(), node.clone(), msg.clone()).await?;
         let _msg: Result<Message> = res.await;
         
         // 3. put it into runtime.spawn(async move { ... }) if needed
-        let mut res: RPCResult = Runtime::rpc(runtime.clone(), node.clone(), msg.clone()).await?;
+        let mut res: RPCResult = rpc(runtime.clone(), node.clone(), msg.clone()).await?;
         let (mut ctx, _handler) = Context::with_timeout(Duration::from_secs(1));
         let _msg: Message = res.done_with(ctx).await?;
         

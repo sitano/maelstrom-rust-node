@@ -1,4 +1,4 @@
-use crate::{Error, Result, Runtime};
+use crate::{Error, Result, rpc, Runtime};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
@@ -78,7 +78,7 @@ impl KV for Storage {
         T: Deserialize<'static> + Send,
     {
         let req = Message::Read::<String> { key };
-        let mut call = Runtime::rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
+        let mut call = rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
         let msg = call.done_with(ctx).await?;
         let data = msg.body.as_obj::<Message<T>>()?;
         match data {
@@ -95,7 +95,7 @@ impl KV for Storage {
         T: Serialize + Send,
     {
         let req = Message::Write::<T> { key, value };
-        let mut call = Runtime::rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
+        let mut call = rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
         let _msg = call.done_with(ctx).await?;
         Ok(())
     }
@@ -105,7 +105,7 @@ impl KV for Storage {
         T: Serialize + Deserialize<'static> + Send,
     {
         let req = Message::Cas::<T> { key, from, to, put };
-        let mut call = Runtime::rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
+        let mut call = rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
         let _msg = call.done_with(ctx).await?;
         Ok(())
     }

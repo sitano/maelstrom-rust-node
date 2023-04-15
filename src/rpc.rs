@@ -2,12 +2,13 @@ use crate::protocol::{ErrorMessageBody, Message};
 use crate::Error;
 use crate::Result;
 use crate::Runtime;
+use serde::Serialize;
 use std::future::Future;
 use std::pin::{pin, Pin};
 use std::task::Poll;
 use tokio::select;
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::OnceCell;
+use tokio::sync::{oneshot, OnceCell};
 use tokio_context::context::Context;
 
 /// Represents a result of a RPC call. Can be awaited with or without timeout.
@@ -16,7 +17,7 @@ use tokio_context::context::Context;
 ///
 /// ```
 /// use maelstrom::protocol::Message;
-/// use maelstrom::{RPCResult, Runtime, Result};
+/// use maelstrom::{RPCResult, Runtime, Result, rpc};
 /// use serde::Serialize;
 /// use tokio_context::context::Context;
 ///
@@ -24,7 +25,7 @@ use tokio_context::context::Context;
 /// where
 ///     T: Serialize,
 /// {
-///     let mut res: RPCResult = Runtime::rpc(runtime, node, msg).await?;
+///     let mut res: RPCResult = rpc(runtime, node, msg).await?;
 ///     return res.done_with(ctx).await;
 /// }
 /// ```
@@ -49,14 +50,14 @@ impl RPCResult {
     ///
     /// ```
     /// use maelstrom::protocol::Message;
-    /// use maelstrom::{RPCResult, Runtime, Result};
+    /// use maelstrom::{RPCResult, Runtime, Result, rpc};
     /// use serde::Serialize;
     ///
     /// async fn call<T>(runtime: Runtime, node: String, msg: T)
     /// where
     ///     T: Serialize,
     /// {
-    ///     let _ = Runtime::rpc(runtime, node, msg).await;
+    ///     let _ = rpc(runtime, node, msg).await;
     /// }
     /// ```
     pub fn done(&mut self) {
@@ -70,7 +71,7 @@ impl RPCResult {
     ///
     /// ```
     /// use maelstrom::protocol::Message;
-    /// use maelstrom::{RPCResult, Runtime, Result};
+    /// use maelstrom::{RPCResult, Runtime, Result, rpc};
     /// use serde::Serialize;
     /// use tokio_context::context::Context;
     ///
@@ -78,7 +79,7 @@ impl RPCResult {
     /// where
     ///     T: Serialize,
     /// {
-    ///     let mut res: RPCResult = Runtime::rpc(runtime, node, msg).await?;
+    ///     let mut res: RPCResult = rpc(runtime, node, msg).await?;
     ///     return res.done_with(ctx).await;
     /// }
     /// ```
@@ -115,14 +116,14 @@ impl Drop for RPCResult {
 ///
 /// ```
 /// use maelstrom::protocol::Message;
-/// use maelstrom::{RPCResult, Runtime, Result};
+/// use maelstrom::{RPCResult, Runtime, Result, rpc};
 /// use serde::Serialize;
 ///
 /// async fn call<T>(runtime: Runtime, node: String, msg: T) -> Result<Message>
 /// where
 ///     T: Serialize,
 /// {
-///     let mut res: RPCResult = Runtime::rpc(runtime, node, msg).await?;
+///     let mut res: RPCResult = rpc(runtime, node, msg).await?;
 ///     return res.await;
 /// }
 /// ```
@@ -146,6 +147,70 @@ impl Future for RPCResult {
             _ => Poll::Pending,
         }
     }
+}
+
+/// Example:
+/// ```
+/// use maelstrom::{Error, Result, rpc, Runtime};
+/// use std::fmt::{Display, Formatter};
+/// use serde::Serialize;
+/// use serde::Deserialize;
+/// use tokio_context::context::Context;
+///
+/// pub struct Storage {
+///     typ: &'static str,
+///     runtime: Runtime,
+/// }
+///
+/// impl Storage {
+///     async fn get<T>(&self, ctx: Context, key: String) -> Result<T>
+///         where
+///             T: Deserialize<'static> + Send,
+///     {
+///         let req = Message::Read::<String> { key };
+///         let mut call = rpc(self.runtime.clone(), self.typ.to_string(), req).await?;
+///         let msg = call.done_with(ctx).await?;
+///         let data = msg.body.as_obj::<Message<T>>()?;
+///         match data {
+///             Message::ReadOk { value } => Ok(value),
+///             _ => Err(Box::new(Error::Custom(
+///                 -1,
+///                 "kv: protocol violated".to_string(),
+///             ))),
+///         }
+///     }
+/// }
+///
+/// #[derive(Serialize, Deserialize)]
+/// #[serde(rename_all = "snake_case", tag = "type")]
+/// enum Message<T> {
+///     Read {
+///         key: String,
+///     },
+///     ReadOk {
+///         value: T,
+///     },
+/// }
+/// ```
+pub async fn rpc<T>(runtime: Runtime, to: String, request: T) -> Result<RPCResult>
+where
+    T: Serialize,
+{
+    let mut msg = crate::protocol::message(runtime.node_id().to_string(), to, request)?;
+    let req_msg_id = runtime.next_msg_id();
+
+    msg.body.msg_id = req_msg_id;
+
+    let (tx, rx) = oneshot::channel::<Message>();
+    let _ = runtime.insert_rpc_sender(req_msg_id, tx).await;
+
+    let req_str = serde_json::to_string(&msg)?;
+    if let Err(err) = runtime.send_raw(req_str.as_str()).await {
+        let _ = runtime.release_rpc_sender(req_msg_id).await;
+        return Err(err);
+    }
+
+    Ok(RPCResult::new(req_msg_id, rx, runtime.clone()))
 }
 
 fn rpc_msg_type(m: Message) -> Result<Message> {

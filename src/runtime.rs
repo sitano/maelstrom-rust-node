@@ -2,8 +2,8 @@
 
 use crate::error::Error;
 use crate::protocol::{ErrorMessageBody, InitMessageBody, Message};
+use crate::rpc_err_to_response;
 use crate::waitgroup::WaitGroup;
-use crate::{rpc_err_to_response, RPCResult};
 use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
 use tokio::select;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, oneshot, Mutex, OnceCell};
+use tokio::sync::{mpsc, Mutex, OnceCell};
 use tokio::task::JoinHandle;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -205,30 +205,6 @@ impl Runtime {
         self.reply(req, Runtime::empty_response()).await
     }
 
-    // TODO: need a way to point out type for rpc(). maybe rpc_with_type().
-    // TODO: maybe put rpc() away out of Runtime::.
-
-    pub async fn rpc<T>(runtime: Runtime, to: String, request: T) -> Result<RPCResult>
-    where
-        T: Serialize,
-    {
-        let mut msg = crate::protocol::message(runtime.node_id().to_string(), to, request)?;
-        let req_msg_id = runtime.next_msg_id();
-
-        msg.body.msg_id = req_msg_id;
-
-        let (tx, rx) = oneshot::channel::<Message>();
-        let _ = runtime.inter.rpc.lock().await.insert(req_msg_id, tx);
-
-        let req_str = serde_json::to_string(&msg)?;
-        if let Err(err) = runtime.send_raw(req_str.as_str()).await {
-            let _ = runtime.release_rpc_sender(req_msg_id).await;
-            return Err(err);
-        }
-
-        Ok(RPCResult::new(req_msg_id, rx, runtime.clone()))
-    }
-
     #[track_caller]
     pub fn spawn<T>(&self, future: T) -> JoinHandle<T::Output>
     where
@@ -409,6 +385,15 @@ impl Runtime {
     #[inline]
     pub fn empty_response() -> Value {
         Value::Object(serde_json::Map::default())
+    }
+
+    #[inline]
+    pub(crate) async fn insert_rpc_sender(
+        &self,
+        id: u64,
+        tx: Sender<Message>,
+    ) -> Option<Sender<Message>> {
+        self.inter.rpc.lock().await.insert(id, tx)
     }
 
     #[inline]
