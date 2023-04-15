@@ -98,27 +98,6 @@ $ RUST_LOG=debug maelstrom test -w broadcast --bin ./target/debug/examples/broad
 implementation:
 
 ```bash
-use async_trait::async_trait;
-use log::info;
-use maelstrom::protocol::{Message, MessageBody};
-use maelstrom::{done, Node, Result, Runtime};
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-
-pub(crate) fn main() -> Result<()> {
-    Runtime::init(try_main())
-}
-
-async fn try_main() -> Result<()> {
-    let handler = Arc::new(Handler::default());
-    Runtime::new().with_handler(handler).run().await
-}
-
-#[derive(Clone, Default)]
-struct Handler {
-    inner: Arc<Mutex<Vec<u64>>>,
-}
-
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
@@ -149,40 +128,9 @@ impl Node for Handler {
         }
     }
 }
-
-impl Handler {
-    fn snapshot(&self) -> Vec<u64> {
-        self.inner.lock().unwrap().clone()
-    }
-
-    fn add(&self, val: u64) {
-        self.inner.lock().unwrap().push(val);
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct BroadcastRequest {
-    #[serde(default, rename = "type")]
-    typ: String,
-    #[serde(default, rename = "message")]
-    value: u64,
-}
-
-#[derive(Serialize)]
-struct ReadResponse {
-    messages: Vec<u64>,
-}
-
-impl BroadcastRequest {
-    fn from_message(m: &MessageBody) -> Result<Self> {
-        let mut msg = m.as_obj::<BroadcastRequest>()?;
-        msg.typ = m.typ.clone();
-        Ok(msg)
-    }
-}
 ```
 
-## Lin-kv workload
+## lin-kv workload
 
 ```bash
 $ cargo build --examples
@@ -192,29 +140,6 @@ $ RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w lin-kv --bin ./target/de
 implementation:
 
 ```rust
-use async_trait::async_trait;
-use maelstrom::kv::{lin_kv, Storage, KV};
-use maelstrom::protocol::Message;
-use maelstrom::{done, Node, Result, Runtime};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio_context::context::Context;
-
-pub(crate) fn main() -> Result<()> {
-    Runtime::init(try_main())
-}
-
-async fn try_main() -> Result<()> {
-    let runtime = Runtime::new();
-    let handler = Arc::new(handler(runtime.clone()));
-    runtime.with_handler(handler).run().await
-}
-
-#[derive(Clone)]
-struct Handler {
-    s: Storage,
-}
-
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
@@ -243,29 +168,62 @@ impl Node for Handler {
 fn handler(runtime: Runtime) -> Handler {
     Handler { s: lin_kv(runtime) }
 }
+```
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "type")]
-enum Request {
-    Read {
-        key: u64,
-    },
-    ReadOk {
-        value: i64,
-    },
-    Write {
-        key: u64,
-        value: i64,
-    },
-    WriteOk {},
-    Cas {
-        key: u64,
-        from: i64,
-        to: i64,
-        #[serde(default, rename = "create_if_not_exists")]
-        put: bool,
-    },
-    CasOk {},
+## g-set workload
+
+```bash
+$ cargo build --examples
+$ RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w g-set --bin ./target/debug/examples/g_set --node-count 2 --concurrency 2n --time-limit 20 --rate 10 --log-stderr
+```
+
+implementation:
+
+```rust
+#[async_trait]
+impl Node for Handler {
+    async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        let msg: Result<Request> = req.body.as_obj();
+        match msg {
+            Ok(Request::Read {}) => {
+                let data = to_seq(&self.s.lock().unwrap());
+                return runtime.reply(req, Request::ReadOk { value: data }).await;
+            }
+            Ok(Request::Add { element }) => {
+                self.s.lock().unwrap().insert(element);
+                return runtime.reply(req, Request::AddOk {}).await;
+            }
+            Ok(Request::ReplicateOne { element }) => {
+                self.s.lock().unwrap().insert(element);
+                return Ok(());
+            }
+            Ok(Request::ReplicateFull { value }) => {
+                let mut s = self.s.lock().unwrap();
+                for v in value {
+                    s.insert(v);
+                }
+                return Ok(());
+            }
+            Ok(Request::Init {}) => {
+                // spawn into tokio (instead of runtime) to not to wait
+                // until it is completed, as it will never be.
+                let (r0, h0) = (runtime.clone(), self.clone());
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        debug!("emit replication signal");
+                        let s = h0.s.lock().unwrap();
+                        for n in r0.neighbours() {
+                            let msg = Request::ReplicateFull { value: to_seq(&s) };
+                            drop(r0.send_async(n.to_string(), msg));
+                        }
+                    }
+                });
+                return Ok(());
+            }
+            _ => done(runtime, req),
+        }
+    }
 }
 ```
 
@@ -341,7 +299,23 @@ impl Node for Handler {
         let mut res: RPCResult = Runtime::rpc(runtime.clone(), node.clone(), msg.clone()).await?;
         let (mut ctx, _handler) = Context::with_timeout(Duration::from_secs(1));
         let _msg: Message = res.done_with(ctx).await?;
-            
+        
+        // 4. async send variant
+        //    spawn into tokio (instead of runtime) to not to wait
+        //    until it is completed, as it will never be.
+        let (r0, h0) = (runtime.clone(), self.clone());
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                debug!("emit replication signal");
+                let s = h0.s.lock().unwrap();
+                for n in r0.neighbours() {
+                    let msg = Request::ReplicateFull { value: to_seq(&s) };
+                    drop(r0.send_async(n.to_string(), msg));
+                }
+            }
+        });
+    
         return runtime.reply_ok(req).await;
     }
 }
@@ -455,30 +429,6 @@ impl Node for Handler {
 
         done(runtime, message)
     }
-}
-
-// Putting `#[serde(rename = "type")] typo: String` is not necessary,
-// as it is auto-deducted.
-#[derive(Serialize)]
-struct EchoResponse {
-    echo: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct BroadcastRequest {
-    #[serde(default, rename = "type")]
-    typ: String,
-    message: u64,
-}
-
-// #[derive(Deserialize)]
-// struct TopologyRequest {
-//     topology: HashMap<String, Vec<String>>,
-// }
-
-#[derive(Serialize)]
-struct ReadResponse {
-    messages: Vec<u64>,
 }
 ```
 

@@ -39,3 +39,6 @@ name = "broadcast_sync"
 
 [[example]]
 name = "lin_kv"
+
+[[example]]
+name = "g_set"
