@@ -153,11 +153,26 @@ impl Runtime {
         Ok(())
     }
 
-    pub async fn send<T>(&self, req: Message, resp: T) -> Result<()>
+    pub fn send_async<T>(&self, to: String, message: T) -> Result<()>
+    where
+        T: Serialize + Send,
+    {
+        let runtime = self.clone();
+        let msg = self.to_message(to, message)?;
+        let ans = serde_json::to_string(&msg)?;
+        self.spawn(async move {
+            if let Err(err) = runtime.send_raw(ans.as_str()).await {
+                error!("send error: {}", err);
+            }
+        });
+        Ok(())
+    }
+
+    pub fn to_message<T>(&self, to: String, message: T) -> Result<Message>
     where
         T: Serialize,
     {
-        let extra = match serde_json::to_value(resp) {
+        let body = match serde_json::to_value(message) {
             Ok(v) => match v {
                 Value::Object(m) => m,
                 _ => bail!("response object has invalid serde_json::Value kind"),
@@ -166,36 +181,42 @@ impl Runtime {
         };
 
         let msg = Message {
-            src: req.dest,
-            dest: req.src,
-            body: MessageBody::from_extra(extra),
+            src: self.node_id().to_string(),
+            dest: to,
+            body: MessageBody::from_extra(body),
         };
 
-        let answer = serde_json::to_string(&msg)?;
-        self.send_raw(answer.as_str()).await
+        Ok(msg)
+    }
+
+    pub async fn send<T>(&self, to: String, message: T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        let msg = self.to_message(to, message)?;
+        let ans = serde_json::to_string(&msg)?;
+        self.send_raw(ans.as_str()).await
+    }
+
+    pub async fn send_back<T>(&self, req: Message, resp: T) -> Result<()>
+    where
+        T: Serialize,
+    {
+        self.send(req.src, resp).await
     }
 
     pub async fn reply<T>(&self, req: Message, resp: T) -> Result<()>
     where
         T: Serialize,
     {
-        let mut extra = match serde_json::to_value(resp) {
-            Ok(v) => match v {
-                Value::Object(m) => m,
-                _ => bail!("response object has invalid serde_json::Value kind"),
-            },
-            Err(e) => bail!("response object is invalid, can't convert: {}", e),
-        };
+        let mut msg = self.to_message(req.src, resp)?;
+        msg.body.in_reply_to = req.body.msg_id;
 
-        if !extra.contains_key("type") && !req.body.typ.is_empty() {
-            extra.insert("type".to_string(), Value::String(req.body.typ + "_ok"));
+        if !msg.body.extra.contains_key("type") && !req.body.typ.is_empty() {
+            let key = "type".to_string();
+            let value = Value::String(req.body.typ + "_ok");
+            msg.body.extra.insert(key, value);
         }
-
-        let msg = Message {
-            src: req.dest,
-            dest: req.src,
-            body: MessageBody::from_extra(extra).with_reply_to(req.body.msg_id),
-        };
 
         let answer = serde_json::to_string(&msg)?;
         self.send_raw(answer.as_str()).await
@@ -371,10 +392,10 @@ impl Runtime {
             return Ok(());
         }
 
+        let mut init_source: Option<(String, u64)> = None;
         let is_init = msg.get_type() == "init";
-        let mut init_source: Option<Message> = None;
         if is_init {
-            init_source = Some(msg.clone());
+            init_source = Some((msg.src.clone(), msg.body.msg_id));
             runtime.process_init(&msg)?;
         }
 
@@ -392,15 +413,11 @@ impl Runtime {
         }
 
         if is_init {
-            let init_source_msg = init_source.unwrap();
+            let (dst, msg_id) = init_source.unwrap();
             let init_resp: Value = serde_json::from_str(
-                format!(
-                    r#"{{"in_reply_to":{},"type":"init_ok"}}"#,
-                    init_source_msg.body.msg_id
-                )
-                .as_str(),
+                format!(r#"{{"in_reply_to":{},"type":"init_ok"}}"#, msg_id).as_str(),
             )?;
-            return runtime.send(init_source_msg, init_resp).await;
+            return runtime.send(dst, init_resp).await;
         }
 
         Ok(())
