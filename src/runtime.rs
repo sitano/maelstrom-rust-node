@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::protocol::{ErrorMessageBody, InitMessageBody, Message};
-use crate::rpc_err_to_response;
+use crate::{rpc_err_to_response, RPCResult};
 use crate::waitgroup::WaitGroup;
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
 use tokio::select;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, Mutex, OnceCell};
+use tokio::sync::{mpsc, Mutex, OnceCell, oneshot};
 use tokio::task::JoinHandle;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -212,10 +212,74 @@ impl Runtime {
         T::Output: Send + 'static,
     {
         let h = self.inter.serving.clone();
-        tokio::spawn(future.then(async move |x| {
+        tokio::spawn(future.then(|x| async move {
             drop(h);
             x
         }))
+    }
+
+    /// Example:
+    /// ```
+    /// use maelstrom::{Error, Result, Runtime};
+    /// use std::fmt::{Display, Formatter};
+    /// use serde::Serialize;
+    /// use serde::Deserialize;
+    /// use tokio_context::context::Context;
+    ///
+    /// pub struct Storage {
+    ///     typ: &'static str,
+    ///     runtime: Runtime,
+    /// }
+    ///
+    /// impl Storage {
+    ///     async fn get<T>(&self, ctx: Context, key: String) -> Result<T>
+    ///         where
+    ///             T: Deserialize<'static> + Send,
+    ///     {
+    ///         let req = Message::Read::<String> { key };
+    ///         let mut call = self.runtime.rpc(self.typ.to_string(), req).await?;
+    ///         let msg = call.done_with(ctx).await?;
+    ///         let data = msg.body.as_obj::<Message<T>>()?;
+    ///         match data {
+    ///             Message::ReadOk { value } => Ok(value),
+    ///             _ => Err(Box::new(Error::Custom(
+    ///                 -1,
+    ///                 "kv: protocol violated".to_string(),
+    ///             ))),
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// #[derive(Serialize, Deserialize)]
+    /// #[serde(rename_all = "snake_case", tag = "type")]
+    /// enum Message<T> {
+    ///     Read {
+    ///         key: String,
+    ///     },
+    ///     ReadOk {
+    ///         value: T,
+    ///     },
+    /// }
+    /// ```
+    pub async fn rpc<T>(&self, to: String, request: T) -> Result<RPCResult>
+        where
+            T: Serialize,
+    {
+        let mut msg = crate::protocol::message(self.node_id().to_string(), to, request)?;
+        let req_msg_id = self.next_msg_id();
+
+        msg.body.msg_id = req_msg_id;
+
+        let (tx, rx) = oneshot::channel::<Message>();
+        let _ = self.insert_rpc_sender(req_msg_id, tx).await;
+
+        let req_str = serde_json::to_string(&msg)?;
+        if let Err(err) = self.send_raw(req_str.as_str()).await {
+            let _ = self.release_rpc_sender(req_msg_id).await;
+            return Err(err);
+        }
+
+        Ok(RPCResult::new(req_msg_id, rx, self.clone()))
     }
 
     pub fn node_id(&self) -> &str {
@@ -275,7 +339,7 @@ impl Runtime {
                             info!("Received {}", line);
 
                             let tx_err0 = tx_err.clone();
-                            self.spawn(Self::process_request(self.clone(), line).then(async move |result| {
+                            self.spawn(Self::process_request(self.clone(), line).then(|result| async move  {
                                 if let Err(e) = result {
                                     if let Some(Error::NotSupported(t)) = e.downcast_ref::<Error>() {
                                         warn!("message type not supported: {}", t);
