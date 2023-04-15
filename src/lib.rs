@@ -1,7 +1,3 @@
-#![feature(async_closure)]
-
-extern crate core;
-
 pub(crate) mod error;
 pub mod kv;
 pub mod log;
