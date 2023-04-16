@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 pub(crate) mod error;
 pub mod kv;
 pub mod log;
