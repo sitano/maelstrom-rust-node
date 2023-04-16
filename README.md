@@ -18,6 +18,7 @@ violated. With maelstrom you build nodes that form distributed system that can p
 - a/sync RPC() support + timeout / context
 - lin/seq/lww kv storage
 - transparent error handling
+- TODO: thiserror + error parsing/ser causes
 
 # Examples
 
