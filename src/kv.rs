@@ -78,8 +78,7 @@ impl KV for Storage {
         T: Deserialize<'static> + Send,
     {
         let req = Message::Read::<String> { key };
-        let mut call = self.runtime.rpc(self.typ.to_string(), req).await?;
-        let msg = call.done_with(ctx).await?;
+        let msg = self.runtime.call(ctx, self.typ.to_string(), req).await?;
         let data = msg.body.as_obj::<Message<T>>()?;
         match data {
             Message::ReadOk { value } => Ok(value),
@@ -96,8 +95,7 @@ impl KV for Storage {
     {
         let req = Message::Write::<T> { key, value };
 
-        let mut call = self.runtime.rpc(self.typ.to_string(), req).await?;
-        let _msg = call.done_with(ctx).await?;
+        let _msg = self.runtime.call(ctx, self.typ.to_string(), req).await?;
         Ok(())
     }
 
@@ -106,8 +104,7 @@ impl KV for Storage {
         T: Serialize + Deserialize<'static> + Send,
     {
         let req = Message::Cas::<T> { key, from, to, put };
-        let mut call = self.runtime.rpc( self.typ.to_string(), req).await?;
-        let _msg = call.done_with(ctx).await?;
+        let _msg = self.runtime.call(ctx, self.typ.to_string(), req).await?;
         Ok(())
     }
 }

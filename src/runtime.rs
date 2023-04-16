@@ -18,8 +18,9 @@ use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
 use tokio::select;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, oneshot, Mutex, OnceCell};
+use tokio::sync::{mpsc, Mutex, OnceCell};
 use tokio::task::JoinHandle;
+use tokio_context::context::Context;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -283,33 +284,21 @@ impl Runtime {
             Err(e) => Err(e),
         };
 
-        let runtime = self.clone();
-
-        async move {
-            let req = req_res?;
-            let (tx, rx) = oneshot::channel::<Message>();
-
-            let _ = runtime.insert_rpc_sender(req_msg_id, tx).await;
-
-            if let Err(err) = runtime.send_raw(req.as_str()).await {
-                let _ = runtime.release_rpc_sender(req_msg_id).await;
-                return Err(err);
-            }
-
-            Ok(RPCResult::new(req_msg_id, rx, runtime))
-        }
+        crate::rpc(self.clone(), req_msg_id, req_res.unwrap())
     }
 
-    /// call() is the same as rpc(). for examples see [`Runtime::rpc`].
+    /// call() is the same as `let _: Result<Message> = rpc().await?.done_with(ctx).await;`.
+    /// for examples see [`Runtime::rpc`] and [`RPCResult`].
     ///
     /// rpc() makes a remote call to another node via message passing interface.
     /// Provided context may serve as a timeout limiter.
     /// RPCResult is immediately canceled on drop.
-    pub fn call<T>(&self, to: String, request: T) -> impl Future<Output = Result<RPCResult>>
+    pub async fn call<T>(&self, ctx: Context, to: String, request: T) -> Result<Message>
     where
         T: Serialize,
     {
-        self.rpc(to, request)
+        let mut call = self.rpc(to, request).await?;
+        call.done_with(ctx).await
     }
 
     /// call_async() is equivalent to `runtime.spawn(runtime.call(...))`.
@@ -318,7 +307,7 @@ impl Runtime {
     where
         T: Serialize + 'static,
     {
-        self.spawn(self.call(to, request));
+        self.spawn(self.rpc(to, request));
     }
 
     pub fn node_id(&self) -> &str {

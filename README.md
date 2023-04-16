@@ -285,19 +285,23 @@ struct Handler {}
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        let (mut ctx, _handler) = Context::with_timeout(Duration::from_secs(1));
+        
         // 1.
         runtime.call_async(node.clone(), msg.clone());
         
         // 2. put it into runtime.spawn(async move { ... }) if needed
         let res: RPCResult = runtime.rpc(node.clone(), msg.clone()).await?;
-        let _msg: Result<Message> = res.await;
+        let msg: Result<Message> = res.await;
         
         // 3. put it into runtime.spawn(async move { ... }) if needed
         let mut res: RPCResult = runtime.rpc(node.clone(), msg.clone()).await?;
-        let (mut ctx, _handler) = Context::with_timeout(Duration::from_secs(1));
-        let _msg: Message = res.done_with(ctx).await?;
+        let msg: Message = res.done_with(ctx).await?;
+
+        // 4. put it into runtime.spawn(async move { ... }) if needed
+        let msg = runtime.call(ctx, node.clone(), msg.clone()).await?;
         
-        // 4. async send variant
+        // 5. async send variant
         //    spawn into tokio (instead of runtime) to not to wait
         //    until it is completed, as it will never be.
         let (r0, h0) = (runtime.clone(), self.clone());
@@ -312,10 +316,6 @@ impl Node for Handler {
                 }
             }
         });
-        
-        // 5.
-        let mut res: RPCResult = runtime.call(node.clone(), msg.clone()).await?;
-        let _msg: Message = res.await?;
     
         return runtime.reply_ok(req).await;
     }

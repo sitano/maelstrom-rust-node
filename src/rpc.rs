@@ -7,7 +7,7 @@ use std::pin::{pin, Pin};
 use std::task::Poll;
 use tokio::select;
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::OnceCell;
+use tokio::sync::{oneshot, OnceCell};
 use tokio_context::context::Context;
 
 /// Represents a result of a RPC call. Can be awaited with or without timeout.
@@ -146,6 +146,19 @@ impl Future for RPCResult {
             _ => Poll::Pending,
         }
     }
+}
+
+pub(crate) async fn rpc(runtime: Runtime, msg_id: u64, req: String) -> Result<RPCResult> {
+    let (tx, rx) = oneshot::channel::<Message>();
+
+    let _ = runtime.insert_rpc_sender(msg_id, tx).await;
+
+    if let Err(err) = runtime.send_raw(req.as_str()).await {
+        let _ = runtime.release_rpc_sender(msg_id).await;
+        return Err(err);
+    }
+
+    Ok(RPCResult::new(msg_id, rx, runtime))
 }
 
 fn rpc_msg_type(m: Message) -> Result<Message> {
