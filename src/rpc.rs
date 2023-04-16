@@ -7,7 +7,7 @@ use std::pin::{pin, Pin};
 use std::task::Poll;
 use tokio::select;
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::{OnceCell};
+use tokio::sync::OnceCell;
 use tokio_context::context::Context;
 
 /// Represents a result of a RPC call. Can be awaited with or without timeout.

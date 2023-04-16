@@ -39,7 +39,7 @@ impl Node for Handler {
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
-                        runtime.spawn(runtime.rpc(node.clone(), msg.clone()));
+                        runtime.call_async(node.clone(), msg.clone());
                     }
                 }
 

@@ -114,7 +114,7 @@ impl Node for Handler {
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
-                        runtime.spawn(runtime.rpc(node.clone(), msg.clone()));
+                        runtime.call_async(node.clone(), msg.clone());
                     }
                 }
 
@@ -143,20 +143,18 @@ implementation:
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        let (ctx, _handler) = Context::new();
         let msg: Result<Request> = req.body.as_obj();
         match msg {
             Ok(Request::Read { key }) => {
-                let (ctx, _handler) = Context::new();
                 let value = self.s.get(ctx, key.to_string()).await?;
                 return runtime.reply(req, Request::ReadOk { value }).await;
             }
             Ok(Request::Write { key, value }) => {
-                let (ctx, _handler) = Context::new();
                 self.s.put(ctx, key.to_string(), value).await?;
                 return runtime.reply(req, Request::WriteOk {}).await;
             }
             Ok(Request::Cas { key, from, to, put }) => {
-                let (ctx, _handler) = Context::new();
                 self.s.cas(ctx, key.to_string(), from, to, put).await?;
                 return runtime.reply(req, Request::CasOk {}).await;
             }
@@ -246,20 +244,18 @@ struct Handler {
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
+        let (ctx, _handler) = Context::new();
         let msg: Result<Request> = req.body.as_obj();
         match msg {
             Ok(Request::Read { key }) => {
-                let (ctx, _handler) = Context::new();
                 let value = self.s.get(ctx, key.to_string()).await?;
                 return runtime.reply(req, Request::ReadOk { value }).await;
             }
             Ok(Request::Write { key, value }) => {
-                let (ctx, _handler) = Context::new();
                 self.s.put(ctx, key.to_string(), value).await?;
                 return runtime.reply(req, Request::WriteOk {}).await;
             }
             Ok(Request::Cas { key, from, to, put }) => {
-                let (ctx, _handler) = Context::new();
                 self.s.cas(ctx, key.to_string(), from, to, put).await?;
                 return runtime.reply(req, Request::CasOk {}).await;
             }
@@ -289,7 +285,7 @@ struct Handler {}
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
         // 1.
-        runtime.spawn(runtime.rpc(node.clone(), msg.clone()));
+        runtime.call_async(node.clone(), msg.clone());
         
         // 2. put it into runtime.spawn(async move { ... }) if needed
         let res: RPCResult = runtime.rpc(node.clone(), msg.clone()).await?;
@@ -315,6 +311,10 @@ impl Node for Handler {
                 }
             }
         });
+        
+        // 5.
+        let mut res: RPCResult = runtime.call(node.clone(), msg.clone()).await?;
+        let _msg: Message = res.await?;
     
         return runtime.reply_ok(req).await;
     }

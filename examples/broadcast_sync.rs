@@ -39,7 +39,8 @@ impl Node for Handler {
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
-                        let _ = runtime.rpc(node.clone(), msg.clone())
+                        let _ = runtime
+                            .rpc(node.clone(), msg.clone())
                             .await? // Result<RPCResult>
                             .await?; // Result<Message>
                     }

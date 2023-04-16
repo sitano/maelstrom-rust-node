@@ -2,8 +2,8 @@
 
 use crate::error::Error;
 use crate::protocol::{ErrorMessageBody, InitMessageBody, Message};
-use crate::{rpc_err_to_response, RPCResult};
 use crate::waitgroup::WaitGroup;
+use crate::{rpc_err_to_response, RPCResult};
 use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Stdout};
 use tokio::select;
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{mpsc, Mutex, OnceCell, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex, OnceCell};
 use tokio::task::JoinHandle;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -218,6 +218,10 @@ impl Runtime {
         }))
     }
 
+    /// rpc() makes a remote call to another node via message passing interface.
+    /// Provided context may serve as a timeout limiter.
+    /// RPCResult is immediately canceled on drop.
+    ///
     /// Example:
     /// ```
     /// use maelstrom::{Error, Result, Runtime};
@@ -262,28 +266,59 @@ impl Runtime {
     /// }
     /// ```
     pub fn rpc<T>(&self, to: String, request: T) -> impl Future<Output = Result<RPCResult>>
-        where
-            T: Serialize,
+    where
+        T: Serialize,
     {
+        let msg = crate::protocol::message(self.node_id().to_string(), to, request);
+
+        let req_msg_id = self.next_msg_id();
+        let req_res: Result<String> = match msg {
+            Ok(mut t) => {
+                t.body.msg_id = req_msg_id;
+                match serde_json::to_string(&t) {
+                    Ok(s) => Ok(s),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
+            Err(e) => Err(e),
+        };
+
         let runtime = self.clone();
 
         async move {
-            let mut msg = crate::protocol::message(runtime.node_id().to_string(), to, request)?;
-            let req_msg_id = runtime.next_msg_id();
-
-            msg.body.msg_id = req_msg_id;
-
+            let req = req_res?;
             let (tx, rx) = oneshot::channel::<Message>();
+
             let _ = runtime.insert_rpc_sender(req_msg_id, tx).await;
 
-            let req_str = serde_json::to_string(&msg)?;
-            if let Err(err) = runtime.send_raw(req_str.as_str()).await {
+            if let Err(err) = runtime.send_raw(req.as_str()).await {
                 let _ = runtime.release_rpc_sender(req_msg_id).await;
                 return Err(err);
             }
 
             Ok(RPCResult::new(req_msg_id, rx, runtime))
         }
+    }
+
+    /// call() is the same as rpc(). for examples see [`Runtime::rpc`].
+    ///
+    /// rpc() makes a remote call to another node via message passing interface.
+    /// Provided context may serve as a timeout limiter.
+    /// RPCResult is immediately canceled on drop.
+    pub fn call<T>(&self, to: String, request: T) -> impl Future<Output = Result<RPCResult>>
+    where
+        T: Serialize,
+    {
+        self.rpc(to, request)
+    }
+
+    /// call_async() is equivalent to `runtime.spawn(runtime.call(...))`.
+    /// see [`Runtime::call`], [`Runtime::rpc`].
+    pub fn call_async<T>(&self, to: String, request: T)
+    where
+        T: Serialize + 'static,
+    {
+        self.spawn(self.call(to, request));
     }
 
     pub fn node_id(&self) -> &str {
