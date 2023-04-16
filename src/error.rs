@@ -51,7 +51,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn code(&self) -> i32 {
+    #[must_use] pub fn code(&self) -> i32 {
         match self {
             Error::Timeout => 0,
             Error::NotSupported(_) => 10,
@@ -67,7 +67,7 @@ impl Error {
         }
     }
 
-    pub fn description(&self) -> &str {
+    #[must_use] pub fn description(&self) -> &str {
         match self {
             Error::Timeout => "timeout",
             Error::NotSupported(t) => t.as_str(),

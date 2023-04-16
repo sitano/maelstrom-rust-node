@@ -35,7 +35,7 @@ pub struct RPCResult {
 }
 
 impl RPCResult {
-    pub fn new(msg_id: u64, rx: Receiver<Message>, runtime: Runtime) -> RPCResult {
+    #[must_use] pub fn new(msg_id: u64, rx: Receiver<Message>, runtime: Runtime) -> RPCResult {
         RPCResult {
             runtime,
             rx: OnceCell::new_with(Some(rx)),
@@ -43,7 +43,7 @@ impl RPCResult {
         }
     }
 
-    /// Releases RPC call resources. Drop calls Self::done().
+    /// Releases RPC call resources. Drop calls `Self::done`().
     ///
     /// Example:
     ///
@@ -109,7 +109,7 @@ impl Drop for RPCResult {
     }
 }
 
-/// Makes RPCResult an awaitable future.
+/// Makes `RPCResult` an awaitable future.
 ///
 /// Example:
 ///

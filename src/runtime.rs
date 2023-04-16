@@ -78,7 +78,7 @@ pub trait Node: Sync + Send {
     async fn process(&self, runtime: Runtime, request: Message) -> Result<()>;
 }
 
-/// Returns a result with NotSupported error meaning that Node.process()
+/// Returns a result with `NotSupported` error meaning that Node.process()
 /// is not aware of specific message type or Ok(()) for init.
 ///
 /// Example:
@@ -133,14 +133,12 @@ impl Runtime {
 }
 
 impl Runtime {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Runtime::default()
     }
 
     pub fn with_handler(self, handler: Arc<dyn Node + Send + Sync>) -> Self {
-        if self.inter.handler.set(handler).is_err() {
-            panic!("runtime handler is already initialized");
-        }
+        assert!(!self.inter.handler.set(handler).is_err(), "runtime handler is already initialized");
         self
     }
 
@@ -221,7 +219,7 @@ impl Runtime {
 
     /// rpc() makes a remote call to another node via message passing interface.
     /// Provided context may serve as a timeout limiter.
-    /// RPCResult is immediately canceled on drop.
+    /// `RPCResult` is immediately canceled on drop.
     ///
     /// Example:
     /// ```
@@ -296,7 +294,7 @@ impl Runtime {
     ///
     /// rpc() makes a remote call to another node via message passing interface.
     /// Provided context may serve as a timeout limiter.
-    /// RPCResult is immediately canceled on drop.
+    /// `RPCResult` is immediately canceled on drop.
     pub async fn call<T>(&self, ctx: Context, to: impl Into<String>, request: T) -> Result<Message>
     where
         T: Serialize,
@@ -305,7 +303,7 @@ impl Runtime {
         call.done_with(ctx).await
     }
 
-    /// call_async() is equivalent to `runtime.spawn(runtime.call(...))`.
+    /// `call_async`() is equivalent to `runtime.spawn(runtime.call(...))`.
     /// see [`Runtime::call`], [`Runtime::rpc`].
     pub fn call_async<T>(&self, to: impl Into<String>, request: T)
     where
@@ -314,14 +312,14 @@ impl Runtime {
         self.spawn(self.rpc(to.into(), request));
     }
 
-    pub fn node_id(&self) -> &str {
+    #[must_use] pub fn node_id(&self) -> &str {
         if let Some(v) = self.inter.membership.get() {
             return v.node_id.as_str();
         }
         ""
     }
 
-    pub fn nodes(&self) -> &[String] {
+    #[must_use] pub fn nodes(&self) -> &[String] {
         if let Some(v) = self.inter.membership.get() {
             return v.nodes.as_slice();
         }
@@ -456,7 +454,7 @@ impl Runtime {
         if is_init {
             let (dst, msg_id) = init_source.unwrap();
             let init_resp: Value = serde_json::from_str(
-                format!(r#"{{"in_reply_to":{},"type":"init_ok"}}"#, msg_id).as_str(),
+                format!(r#"{{"in_reply_to":{msg_id},"type":"init_ok"}}"#).as_str(),
             )?;
             return runtime.send(dst, init_resp).await;
         }
@@ -474,12 +472,12 @@ impl Runtime {
     }
 
     #[inline]
-    pub fn next_msg_id(&self) -> u64 {
+    #[must_use] pub fn next_msg_id(&self) -> u64 {
         self.inter.msg_id.fetch_add(1, AcqRel)
     }
 
     #[inline]
-    pub fn empty_response() -> Value {
+    #[must_use] pub fn empty_response() -> Value {
         Value::Object(serde_json::Map::default())
     }
 
@@ -498,12 +496,12 @@ impl Runtime {
     }
 
     #[inline]
-    pub fn is_client(&self, src: &String) -> bool {
+    #[must_use] pub fn is_client(&self, src: &String) -> bool {
         !src.is_empty() && src.starts_with('c')
     }
 
     #[inline]
-    pub fn is_from_cluster(&self, src: &String) -> bool {
+    #[must_use] pub fn is_from_cluster(&self, src: &String) -> bool {
         // alternative implementation: self.nodes().contains(src)
         !src.is_empty() && src.starts_with('n')
     }

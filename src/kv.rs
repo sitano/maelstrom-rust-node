@@ -34,7 +34,7 @@ pub struct Storage {
 }
 
 /// Creates a linearizable storage.
-pub fn lin_kv(runtime: Runtime) -> Storage {
+#[must_use] pub fn lin_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "lin-kv",
         runtime,
@@ -42,7 +42,7 @@ pub fn lin_kv(runtime: Runtime) -> Storage {
 }
 
 /// Creates a sequentially consistent storage.
-pub fn seq_kv(runtime: Runtime) -> Storage {
+#[must_use] pub fn seq_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "seq-kv",
         runtime,
@@ -50,7 +50,7 @@ pub fn seq_kv(runtime: Runtime) -> Storage {
 }
 
 /// Creates last-write-wins storage type.
-pub fn lww_kv(runtime: Runtime) -> Storage {
+#[must_use] pub fn lww_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "lww-kv",
         runtime,
@@ -58,7 +58,7 @@ pub fn lww_kv(runtime: Runtime) -> Storage {
 }
 
 /// Creates total-store-order kind of storage.
-pub fn tso_kv(runtime: Runtime) -> Storage {
+#[must_use] pub fn tso_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "lin-tso",
         runtime,
