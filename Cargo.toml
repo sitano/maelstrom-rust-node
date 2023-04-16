@@ -11,7 +11,7 @@ edition = "2021"
 name = "maelstrom-node"
 readme = "README.md"
 repository = "https://github.com/sitano/maelstrom-rust-node"
-version = "0.1.4"
+version = "0.1.5"
 
 [dependencies]
 async-trait = "0.1.68"
