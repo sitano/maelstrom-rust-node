@@ -115,7 +115,7 @@ impl Node for Handler {
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
-                        runtime.call_async(node.clone(), msg.clone());
+                        runtime.call_async(node, msg.clone());
                     }
                 }
 
@@ -288,18 +288,18 @@ impl Node for Handler {
         let (mut ctx, _handler) = Context::with_timeout(Duration::from_secs(1));
         
         // 1.
-        runtime.call_async(node.clone(), msg.clone());
+        runtime.call_async(node, msg.clone());
         
         // 2. put it into runtime.spawn(async move { ... }) if needed
-        let res: RPCResult = runtime.rpc(node.clone(), msg.clone()).await?;
+        let res: RPCResult = runtime.rpc(node, msg.clone()).await?;
         let msg: Result<Message> = res.await;
         
         // 3. put it into runtime.spawn(async move { ... }) if needed
-        let mut res: RPCResult = runtime.rpc(node.clone(), msg.clone()).await?;
+        let mut res: RPCResult = runtime.rpc(node, msg.clone()).await?;
         let msg: Message = res.done_with(ctx).await?;
 
         // 4. put it into runtime.spawn(async move { ... }) if needed
-        let msg = runtime.call(ctx, node.clone(), msg.clone()).await?;
+        let msg = runtime.call(ctx, node, msg.clone()).await?;
         
         // 5. async send variant
         //    spawn into tokio (instead of runtime) to not to wait
@@ -312,7 +312,7 @@ impl Node for Handler {
                 let s = h0.s.lock().unwrap();
                 for n in r0.neighbours() {
                     let msg = Request::ReplicateFull { value: to_seq(&s) };
-                    drop(r0.send_async(n.to_string(), msg));
+                    drop(r0.send_async(n, msg));
                 }
             }
         });

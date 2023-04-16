@@ -78,7 +78,7 @@ impl KV for Storage {
         T: Deserialize<'static> + Send,
     {
         let req = Message::Read::<String> { key };
-        let msg = self.runtime.call(ctx, self.typ.to_string(), req).await?;
+        let msg = self.runtime.call(ctx, self.typ, req).await?;
         let data = msg.body.as_obj::<Message<T>>()?;
         match data {
             Message::ReadOk { value } => Ok(value),
@@ -94,8 +94,7 @@ impl KV for Storage {
         T: Serialize + Send,
     {
         let req = Message::Write::<T> { key, value };
-
-        let _msg = self.runtime.call(ctx, self.typ.to_string(), req).await?;
+        let _msg = self.runtime.call(ctx, self.typ, req).await?;
         Ok(())
     }
 
@@ -104,7 +103,7 @@ impl KV for Storage {
         T: Serialize + Deserialize<'static> + Send,
     {
         let req = Message::Cas::<T> { key, from, to, put };
-        let _msg = self.runtime.call(ctx, self.typ.to_string(), req).await?;
+        let _msg = self.runtime.call(ctx, self.typ, req).await?;
         Ok(())
     }
 }

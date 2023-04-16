@@ -79,9 +79,9 @@ impl MessageBody {
         Self::default()
     }
 
-    pub fn with_type(self, typ: &str) -> Self {
+    pub fn with_type(self, typ: impl Into<String>) -> Self {
         let mut t = self;
-        t.typ = typ.to_string();
+        t.typ = typ.into();
         t
     }
 
@@ -152,11 +152,11 @@ impl MessageBody {
 }
 
 impl ErrorMessageBody {
-    pub fn new(code: i32, text: &str) -> Self {
+    pub fn new(code: i32, text: impl Into<String>) -> Self {
         ErrorMessageBody {
             typ: "error".to_string(),
             code,
-            text: text.to_string(),
+            text: text.into(),
         }
     }
 
@@ -179,7 +179,7 @@ impl From<Error> for ErrorMessageBody {
     }
 }
 
-pub fn message<T>(from: String, to: String, message: T) -> Result<Message>
+pub fn message<T>(from: impl Into<String>, to: impl Into<String>, message: T) -> Result<Message>
 where
     T: Serialize,
 {
@@ -192,8 +192,8 @@ where
     };
 
     let msg = Message {
-        src: from,
-        dest: to,
+        src: from.into(),
+        dest: to.into(),
         body: MessageBody::from_extra(body),
     };
 

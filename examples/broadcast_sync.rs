@@ -35,12 +35,12 @@ impl Node for Handler {
             "broadcast" => {
                 let msg = BroadcastRequest::from_message(&req.body)?;
 
-                self.add(msg.value);
+                self.add(msg.message);
 
                 if !runtime.is_from_cluster(&req.src) {
                     for node in runtime.neighbours() {
                         let _ = runtime
-                            .rpc(node.clone(), msg.clone())
+                            .rpc(node, msg.clone())
                             .await? // Result<RPCResult>
                             .await?; // Result<Message>
                     }
@@ -69,10 +69,7 @@ impl Handler {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct BroadcastRequest {
-    #[serde(default, rename = "type")]
-    typ: String,
-    #[serde(default, rename = "message")]
-    value: u64,
+    message: u64,
 }
 
 #[derive(Serialize)]
@@ -82,8 +79,6 @@ struct ReadResponse {
 
 impl BroadcastRequest {
     fn from_message(m: &MessageBody) -> Result<Self> {
-        let mut msg = m.as_obj::<BroadcastRequest>()?;
-        msg.typ = m.typ.clone();
-        Ok(msg)
+        m.as_obj::<BroadcastRequest>()
     }
 }

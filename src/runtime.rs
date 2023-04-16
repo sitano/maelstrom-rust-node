@@ -154,12 +154,12 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn send_async<T>(&self, to: String, message: T) -> Result<()>
+    pub fn send_async<T>(&self, to: impl Into<String>, message: T) -> Result<()>
     where
         T: Serialize + Send,
     {
         let runtime = self.clone();
-        let msg = crate::protocol::message(self.node_id().to_string(), to, message)?;
+        let msg = crate::protocol::message(self.node_id(), to, message)?;
         let ans = serde_json::to_string(&msg)?;
         self.spawn(async move {
             if let Err(err) = runtime.send_raw(ans.as_str()).await {
@@ -169,11 +169,11 @@ impl Runtime {
         Ok(())
     }
 
-    pub async fn send<T>(&self, to: String, message: T) -> Result<()>
+    pub async fn send<T>(&self, to: impl Into<String>, message: T) -> Result<()>
     where
         T: Serialize,
     {
-        let msg = crate::protocol::message(self.node_id().to_string(), to, message)?;
+        let msg = crate::protocol::message(self.node_id(), to, message)?;
         let ans = serde_json::to_string(&msg)?;
         self.send_raw(ans.as_str()).await
     }
@@ -189,7 +189,7 @@ impl Runtime {
     where
         T: Serialize,
     {
-        let mut msg = crate::protocol::message(self.node_id().to_string(), req.src, resp)?;
+        let mut msg = crate::protocol::message(self.node_id(), req.src, resp)?;
         msg.body.in_reply_to = req.body.msg_id;
 
         if !msg.body.extra.contains_key("type") && !req.body.typ.is_empty() {
@@ -242,7 +242,7 @@ impl Runtime {
     ///             T: Deserialize<'static> + Send,
     ///     {
     ///         let req = Message::Read::<String> { key };
-    ///         let mut call = self.runtime.rpc(self.typ.to_string(), req).await?;
+    ///         let mut call = self.runtime.rpc(self.typ, req).await?;
     ///         let msg = call.done_with(ctx).await?;
     ///         let data = msg.body.as_obj::<Message<T>>()?;
     ///         match data {
@@ -266,11 +266,15 @@ impl Runtime {
     ///     },
     /// }
     /// ```
-    pub fn rpc<T>(&self, to: String, request: T) -> impl Future<Output = Result<RPCResult>>
+    pub fn rpc<T>(
+        &self,
+        to: impl Into<String>,
+        request: T,
+    ) -> impl Future<Output = Result<RPCResult>>
     where
         T: Serialize,
     {
-        let msg = crate::protocol::message(self.node_id().to_string(), to, request);
+        let msg = crate::protocol::message(self.node_id(), to, request);
 
         let req_msg_id = self.next_msg_id();
         let req_res: Result<String> = match msg {
@@ -293,7 +297,7 @@ impl Runtime {
     /// rpc() makes a remote call to another node via message passing interface.
     /// Provided context may serve as a timeout limiter.
     /// RPCResult is immediately canceled on drop.
-    pub async fn call<T>(&self, ctx: Context, to: String, request: T) -> Result<Message>
+    pub async fn call<T>(&self, ctx: Context, to: impl Into<String>, request: T) -> Result<Message>
     where
         T: Serialize,
     {
@@ -303,11 +307,11 @@ impl Runtime {
 
     /// call_async() is equivalent to `runtime.spawn(runtime.call(...))`.
     /// see [`Runtime::call`], [`Runtime::rpc`].
-    pub fn call_async<T>(&self, to: String, request: T)
+    pub fn call_async<T>(&self, to: impl Into<String>, request: T)
     where
         T: Serialize + 'static,
     {
-        self.spawn(self.rpc(to, request));
+        self.spawn(self.rpc(to.into(), request));
     }
 
     pub fn node_id(&self) -> &str {
