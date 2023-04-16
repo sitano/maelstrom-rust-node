@@ -73,7 +73,7 @@ impl Node for Handler {
 }
 
 fn to_seq(s: &MutexGuard<HashSet<i64>>) -> Vec<i64> {
-    s.iter().map(|t| *t).collect()
+    s.iter().copied().collect()
 }
 
 #[derive(Serialize, Deserialize)]
