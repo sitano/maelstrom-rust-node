@@ -102,27 +102,27 @@ implementation:
 #[async_trait]
 impl Node for Handler {
     async fn process(&self, runtime: Runtime, req: Message) -> Result<()> {
-        match req.get_type() {
-            "read" => {
+        let msg: Result<Request> = req.body.as_obj();
+        match msg {
+            Ok(Request::Read {}) => {
                 let data = self.snapshot();
-                let msg = ReadResponse { messages: data };
+                let msg = Request::ReadOk { messages: data };
                 return runtime.reply(req, msg).await;
             }
-            "broadcast" => {
-                let msg = BroadcastRequest::from_message(&req.body)?;
-
-                self.add(msg.value);
-
-                if !runtime.is_from_cluster(&req.src) {
+            Ok(Request::Broadcast { message: element }) => {
+                if self.try_add(element) {
+                    info!("messages now {}", element);
                     for node in runtime.neighbours() {
-                        runtime.call_async(node, msg.clone());
+                        runtime.call_async(node, Request::Broadcast { message: element });
                     }
                 }
 
                 return runtime.reply_ok(req).await;
             }
-            "topology" => {
-                info!("new topology {:?}", req.body.extra.get("topology").unwrap());
+            Ok(Request::Topology { topology }) => {
+                let neighbours = topology.get(runtime.node_id()).unwrap();
+                self.inner.lock().unwrap().t = neighbours.clone();
+                info!("My neighbors are {:?}", neighbours);
                 return runtime.reply_ok(req).await;
             }
             _ => done(runtime, req),
