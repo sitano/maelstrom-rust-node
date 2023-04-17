@@ -35,7 +35,8 @@ pub struct RPCResult {
 }
 
 impl RPCResult {
-    #[must_use] pub fn new(msg_id: u64, rx: Receiver<Message>, runtime: Runtime) -> RPCResult {
+    #[must_use]
+    pub fn new(msg_id: u64, rx: Receiver<Message>, runtime: Runtime) -> RPCResult {
         RPCResult {
             runtime,
             rx: OnceCell::new_with(Some(rx)),
@@ -143,17 +144,19 @@ impl Future for RPCResult {
                     Ok(m) => Poll::Ready(rpc_msg_type(m)),
                 }
             }
-            _ => Poll::Pending,
+            Poll::Pending => Poll::Pending,
         }
     }
 }
 
-pub(crate) async fn rpc(runtime: Runtime, msg_id: u64, req: String) -> Result<RPCResult> {
+pub(crate) async fn rpc(runtime: Runtime, msg_id: u64, req: Result<String>) -> Result<RPCResult> {
+    let req_str = req?;
+
     let (tx, rx) = oneshot::channel::<Message>();
 
     let _ = runtime.insert_rpc_sender(msg_id, tx).await;
 
-    if let Err(err) = runtime.send_raw(req.as_str()).await {
+    if let Err(err) = runtime.send_raw(req_str.as_str()).await {
         let _ = runtime.release_rpc_sender(msg_id).await;
         return Err(err);
     }

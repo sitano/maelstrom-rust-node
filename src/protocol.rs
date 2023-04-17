@@ -36,10 +36,6 @@ pub struct MessageBody {
     pub extra: Map<String, Value>,
 }
 
-fn u64_zero_by_ref(num: &u64) -> bool {
-    *num == 0
-}
-
 /// `InitMessageBody` represents the message body for the "init" message.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Default)]
 pub struct InitMessageBody {
@@ -69,42 +65,49 @@ pub struct ErrorMessageBody {
 }
 
 impl Message {
-    #[must_use] pub fn get_type(&self) -> &str {
+    #[must_use]
+    pub fn get_type(&self) -> &str {
         return self.body.typ.as_str();
     }
 }
 
 impl MessageBody {
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_type(self, typ: impl Into<String>) -> Self {
         let mut t = self;
         t.typ = typ.into();
         t
     }
 
-    #[must_use] pub fn with_reply_to(self, in_reply_to: u64) -> Self {
+    #[must_use]
+    pub fn with_reply_to(self, in_reply_to: u64) -> Self {
         let mut t = self;
         t.in_reply_to = in_reply_to;
         t
     }
 
-    #[must_use] pub fn and_msg_id(self, msg_id: u64) -> Self {
+    #[must_use]
+    pub fn and_msg_id(self, msg_id: u64) -> Self {
         let mut t = self;
         t.msg_id = msg_id;
         t
     }
 
-    #[must_use] pub fn from_extra(extra: Map<String, Value>) -> Self {
+    #[must_use]
+    pub fn from_extra(extra: Map<String, Value>) -> Self {
         MessageBody {
             extra,
             ..Default::default()
         }
     }
 
-    #[must_use] pub fn is_error(&self) -> bool {
+    #[must_use]
+    pub fn is_error(&self) -> bool {
         self.typ == "error"
     }
 
@@ -119,7 +122,8 @@ impl MessageBody {
     ///     serde_json::from_value::<BroadcastRequest>(m.body.raw())
     /// }
     /// ```
-    #[must_use] pub fn raw(&self) -> Value {
+    #[must_use]
+    pub fn raw(&self) -> Value {
         // we could name it to reflect cloning, but ok.
         // we also could re-serialize whole self to Value first, but probably not needed.
         // users usually need at least type to serialize it into the errors.
@@ -160,7 +164,8 @@ impl ErrorMessageBody {
         }
     }
 
-    #[must_use] pub fn from_error(err: Error) -> Self {
+    #[must_use]
+    pub fn from_error(err: Error) -> Self {
         Self::from(err)
     }
 }
@@ -198,6 +203,11 @@ where
     };
 
     Ok(msg)
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn u64_zero_by_ref(num: &u64) -> bool {
+    *num == 0
 }
 
 #[cfg(test)]

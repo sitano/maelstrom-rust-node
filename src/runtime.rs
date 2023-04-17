@@ -98,6 +98,7 @@ pub trait Node: Sync + Send {
 ///     }
 /// }
 /// ```
+#[allow(clippy::needless_pass_by_value)]
 pub fn done(runtime: Runtime, message: Message) -> Result<()> {
     if message.get_type() == "init" {
         return Ok(());
@@ -133,12 +134,17 @@ impl Runtime {
 }
 
 impl Runtime {
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Runtime::default()
     }
 
+    #[must_use]
     pub fn with_handler(self, handler: Arc<dyn Node + Send + Sync>) -> Self {
-        assert!(!self.inter.handler.set(handler).is_err(), "runtime handler is already initialized");
+        assert!(
+            self.inter.handler.set(handler).is_ok(),
+            "runtime handler is already initialized"
+        );
         self
     }
 
@@ -286,7 +292,7 @@ impl Runtime {
             Err(e) => Err(e),
         };
 
-        crate::rpc(self.clone(), req_msg_id, req_res.unwrap())
+        crate::rpc(self.clone(), req_msg_id, req_res)
     }
 
     /// call() is the same as `let _: Result<Message> = rpc().await?.done_with(ctx).await;`.
@@ -312,14 +318,16 @@ impl Runtime {
         self.spawn(self.rpc(to.into(), request));
     }
 
-    #[must_use] pub fn node_id(&self) -> &str {
+    #[must_use]
+    pub fn node_id(&self) -> &str {
         if let Some(v) = self.inter.membership.get() {
             return v.node_id.as_str();
         }
         ""
     }
 
-    #[must_use] pub fn nodes(&self) -> &[String] {
+    #[must_use]
+    pub fn nodes(&self) -> &[String] {
         if let Some(v) = self.inter.membership.get() {
             return v.nodes.as_slice();
         }
@@ -327,14 +335,14 @@ impl Runtime {
     }
 
     pub fn set_membership_state(&self, state: MembershipState) -> Result<()> {
+        debug!("new {:?}", state);
+
         if let Err(e) = self.inter.membership.set(state) {
             bail!("membership is inited: {}", e);
         }
 
         // new node = new message sequence
         self.inter.msg_id.store(1, Release);
-
-        debug!("new {:?}", self.inter.membership.get().unwrap());
 
         Ok(())
     }
@@ -472,12 +480,14 @@ impl Runtime {
     }
 
     #[inline]
-    #[must_use] pub fn next_msg_id(&self) -> u64 {
+    #[must_use]
+    pub fn next_msg_id(&self) -> u64 {
         self.inter.msg_id.fetch_add(1, AcqRel)
     }
 
     #[inline]
-    #[must_use] pub fn empty_response() -> Value {
+    #[must_use]
+    pub fn empty_response() -> Value {
         Value::Object(serde_json::Map::default())
     }
 
@@ -496,12 +506,14 @@ impl Runtime {
     }
 
     #[inline]
-    #[must_use] pub fn is_client(&self, src: &String) -> bool {
+    #[must_use]
+    pub fn is_client(&self, src: &String) -> bool {
         !src.is_empty() && src.starts_with('c')
     }
 
     #[inline]
-    #[must_use] pub fn is_from_cluster(&self, src: &String) -> bool {
+    #[must_use]
+    pub fn is_from_cluster(&self, src: &String) -> bool {
         // alternative implementation: self.nodes().contains(src)
         !src.is_empty() && src.starts_with('n')
     }

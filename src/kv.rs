@@ -34,7 +34,8 @@ pub struct Storage {
 }
 
 /// Creates a linearizable storage.
-#[must_use] pub fn lin_kv(runtime: Runtime) -> Storage {
+#[must_use]
+pub fn lin_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "lin-kv",
         runtime,
@@ -42,7 +43,8 @@ pub struct Storage {
 }
 
 /// Creates a sequentially consistent storage.
-#[must_use] pub fn seq_kv(runtime: Runtime) -> Storage {
+#[must_use]
+pub fn seq_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "seq-kv",
         runtime,
@@ -50,7 +52,8 @@ pub struct Storage {
 }
 
 /// Creates last-write-wins storage type.
-#[must_use] pub fn lww_kv(runtime: Runtime) -> Storage {
+#[must_use]
+pub fn lww_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "lww-kv",
         runtime,
@@ -58,7 +61,8 @@ pub struct Storage {
 }
 
 /// Creates total-store-order kind of storage.
-#[must_use] pub fn tso_kv(runtime: Runtime) -> Storage {
+#[must_use]
+pub fn tso_kv(runtime: Runtime) -> Storage {
     Storage {
         typ: "lin-tso",
         runtime,
@@ -139,6 +143,7 @@ enum Message<T> {
     CasOk {},
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_ref_false(b: &bool) -> bool {
     !*b
 }
