@@ -34,7 +34,7 @@ implementation:
 ```rust
 use async_trait::async_trait;
 use maelstrom::protocol::Message;
-use maelstrom::{Node, Result, Runtime};
+use maelstrom::{done, Node, Result, Runtime};
 use std::sync::Arc;
 
 pub(crate) fn main() -> Result<()> {
@@ -57,7 +57,7 @@ impl Node for Handler {
             return runtime.reply(req, echo).await;
         }
 
-        done(runtime, message)
+        done(runtime, req)
     }
 }
 ```
