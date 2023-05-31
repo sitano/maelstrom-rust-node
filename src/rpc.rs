@@ -3,7 +3,7 @@ use crate::Error;
 use crate::Result;
 use crate::Runtime;
 use std::future::Future;
-use std::pin::{pin, Pin};
+use std::pin::Pin;
 use std::task::Poll;
 use tokio::select;
 use tokio::sync::oneshot::Receiver;
@@ -131,12 +131,12 @@ impl Future for RPCResult {
     type Output = Result<Message>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let rx = pin!(match self.rx.get_mut() {
+        let mut rx = Box::pin(match self.rx.get_mut() {
             Some(x) => x,
             None => return Poll::Ready(Err(Box::new(Error::Abort))),
         });
 
-        match rx.poll(cx) {
+        match rx.as_mut().poll(cx) {
             Poll::Ready(t) => {
                 let _ = self.rx.take();
                 match t {
