@@ -99,9 +99,17 @@ impl MessageBody {
     }
 
     #[must_use]
-    pub fn from_extra(extra: Map<String, Value>) -> Self {
+    pub fn from_extra<I, K, V>(extra: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<Value>,
+    {
         MessageBody {
-            extra,
+            extra: extra
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into()))
+                .collect(),
             ..Default::default()
         }
     }
